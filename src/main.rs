@@ -18,23 +18,48 @@ fn sort_sbwt_graphs() {
     // let tree: [Node; ..] = ;
 }
 
-#[inline(always)]
-fn parent2(tree: &[Node], node: usize) -> usize {
-    tree[tree[node].parent].parent
-}
-
-#[inline(always)]
-fn parent3(tree: &[Node], node: usize) -> usize {
-    tree[parent2(tree, node)].parent
-}
+// #[inline(always)]
+// fn parent2(tree: &[Node], node: usize) -> usize {
+//     tree[tree[node].parent].parent
+// }
 
 #[inline]
 fn climb(tree: &[Node], node: usize, offset: usize) -> usize {
     match offset {
         0 => node,
         1 => tree[node].parent,
-        2 => parent2(tree, node),
-        _ => parent3(tree, node),
+        _ => tree[tree[node].parent].parent,
+    }
+}
+
+fn radix_pass(
+    tree: &[Node],
+    source_buffer: &[usize],
+    target_buffer: &mut [usize],
+    offset: usize,
+    bucket_buffer: &mut Vec<usize>,
+    alpha: usize
+) {
+    bucket_buffer.clear();
+    bucket_buffer.reserve(alpha + 1);
+    bucket_buffer.extend(std::iter::repeat_n(0, alpha + 1));
+
+    for &node in source_buffer {
+        let offset_node = climb(tree, node, offset);
+        let name = tree[offset_node].name;
+        bucket_buffer[name + 1] += 1;
+    }
+
+    for i in 1..alpha {
+        bucket_buffer[i] += bucket_buffer[i - 1]
+    }
+
+    for &node in source_buffer {
+        let offset_node = climb(tree, node, offset);
+        let name = tree[offset_node].name;
+        let target_index = bucket_buffer[name];
+        bucket_buffer[name] += 1;
+        target_buffer[target_index] = node;
     }
 }
 
@@ -49,14 +74,11 @@ fn sort_tree(
     depth: usize,
     k: usize
 ) {
-    bucket_buffer.clear();
-    bucket_buffer.reserve(alpha);
 
     // 
     // // n := tree.len();
     //
-    // // step 0: construct the sample (calculate depth?)
-    // // count modulos.
+    // // step 0: construct the sample (calculate depth?) count modulos.
     // let tree_to_sampled_set_mapping : Vec<usize> = [n];
     // //  contains mapping to the original tree.
     // //  vvvvvvvvvvvvv 
@@ -71,10 +93,9 @@ fn sort_tree(
     // // - from [tree_to_sampled_set_mapping] and j we can find the index j' in [sampled_set]
     //
     // // step 1: sort the samples
-    // radix_pass(tree, sampled_set_swap, sampled_set, parent_offset: 2);
-    // radix_pass(tree, sampled_set, sampled_set_swap, parent_offset: 1);
-    // radix_pass(tree, sampled_set_swap, sampled_set, parent_offset: 0);
-    // // copy [sampled_set] to [sampled_set_swap]
+    // radix_pass(tree, sampled_set, sampled_set_swap, offset: 2);
+    // radix_pass(tree, sampled_set_swap, sampled_set, offset: 1);
+    // radix_pass(tree, sampled_set, sampled_set_swap, offset: 0);
     //
     // // - [sampled_set] contains (almost) sorted indices in [tree]
     //
@@ -82,12 +103,12 @@ fn sort_tree(
     // let mut name = 0;
     //
     // // - in the order induced by [sampled_set] iterate through [sampled_nodes]
+    // // ! pass through the mapping to get the correct index
     // //   - if the 3-tuple of characters of this node is different from the previous:
     // //     1. assign it the current name (the first 3-tuple is null)
     // //     2. increment the name
-    // //   - set the name
+    // //   - set the name of this node
     // 
-
     //
     // // TODO: rework this:
     //
@@ -108,6 +129,10 @@ fn sort_tree(
     //     // [sampled_node_indices_swap] contains indices into [tree]
     //     // we want [sampled_node_indices] to contain 
     // }
+    //
+    // // step 2: sort [residual_set]
+    // // move [sampled_set_swap] to [residual_set_buckets]
+    // radix_pass(tree, residual_set, residual_set_buckets, offset: 0);
     //
     // 
     // TODO: finish sketching out the algorithm
