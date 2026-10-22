@@ -1,5 +1,9 @@
 #![allow(unused)]
 
+pub mod rmq;
+
+use rmq::RangeMinimumSupport;
+
 use sbwt::BuildByLibsais;
 use sbwt::SbwtIndex;
 use sbwt::SubsetSeq;
@@ -11,9 +15,9 @@ struct Node {
     depth: usize,
     parent: usize,
     name: usize,
+    // lcp: usize, // ?
 }
 
-struct RangeMinimumSupport;
 struct LongestCommonExtensionSupport;
 fn longest_common_extension<SS1, SS2>(sbwt_1: &SbwtIndex<SS1>, sbwt_2: &SbwtIndex<SS2>) -> LongestCommonExtensionSupport
 where
@@ -38,8 +42,10 @@ where
     enumerate_tree_from_sbwt(sbwt_2, &mut stack, &mut tree, sbwt_1_size);
 
     let mut order = vec![0_usize; tree.len()];
+    let mut lcp = vec![0_usize; tree.len()];
+    let mut rmq = RangeMinimumSupport::with_capacity(tree.len());
     let mut bucket_buffer = vec![];
-    sort_tree(&mut tree, &mut order, &mut bucket_buffer, 5, 1, sbwt_1.k());
+    sort_tree(&mut tree, &mut order, &mut lcp, &mut rmq, &mut bucket_buffer, 5, 1, sbwt_1.k());
 
     let mut kmer_buffer = vec![0_u8; sbwt_1.k()];
     for &tree_index in &order {
@@ -136,11 +142,13 @@ fn radix_pass(
 const EXTRA_BUFFER_SPACE: usize = 1;
 
 // alpha - alphabet size
-#[allow(clippy::ptr_arg)]
 #[allow(clippy::only_used_in_recursion)]
+#[allow(clippy::too_many_arguments)]
 fn sort_tree(
     tree: &mut [Node],
     order: &mut [usize],
+    lcp: &mut [usize],
+    rmq: &mut RangeMinimumSupport,
     bucket_buffer: &mut Vec<usize>,
     alpha: usize,
     depth: usize,
@@ -232,6 +240,9 @@ fn sort_tree(
             tree[climb(tree, index_in_tree, 1)].name,
             tree[climb(tree, index_in_tree, 2)].name,
         );
+
+        // TODO: store preliminary LCP values for the sampled nodes.
+
         if tuple_name != sampled_node_tuple_name {
             name += 1;
             tuple_name = sampled_node_tuple_name;
@@ -244,12 +255,17 @@ fn sort_tree(
     // Step 1.2: check whether the names are unique.
     if name < sample_tree.len() && depth < k {
         let alpha = name;
-        sort_tree(&mut sample_tree, &mut sample_indices, bucket_buffer, alpha, depth * 3, k);
+        
+        // TODO: calculates correct LCP values? (and in turn rmq would be correct as well?)
+        sort_tree(&mut sample_tree, &mut sample_indices, lcp, rmq, bucket_buffer, alpha, depth * 3, k);
+
         #[allow(clippy::needless_range_loop)]
         for i in 0..sample_count {
             let index_in_sample_tree = sample_indices[i];
             sample_tree[index_in_sample_tree].name = i + 1;
         }
+    } else {
+        // TODO: update rmq with the new lcp values.
     }
 
     // Step 2: sort residual indices.
@@ -345,11 +361,14 @@ fn sort_tree(
             }
         }
 
+        // TODO: write LCP value
+
         write_i += 1;
     }
     while residual_i < residual_count {
         let current_residual_node = residual_indices[residual_i];
         order[write_i] = current_residual_node;
+        // TODO: write LCP value
         residual_i += 1;
         write_i += 1;
     }
@@ -357,22 +376,13 @@ fn sort_tree(
         let index_in_sample_tree  = sample_indices[sample_i];
         let current_sample_node   = sample_tree[index_in_sample_tree].id;
         order[write_i] = current_sample_node;
+        // TODO: write LCP value
         sample_i += 1;
         write_i += 1;
     }
 }
 
 struct LevelAncestorSupport;
-
-// (Idea) construct LCP out of [order] and [tree]:
-// - construct "Phi" array - i.e. for each node which other node it should be compared to by
-//   scanning [order]
-// - traverse the [tree] array back to front: we want the children first and then the parents;
-//   when the LCP value for a child has been calculated set the "potential" LCP value of the parent
-//   to be the maximum of its current "potential" LCP value (initially 0) and LCP[child]-1 
-// - when calculating the LCP value for the current node use a level ancestor query to jump
-//   at the parent node at which the potential LCP ends; do the same with the node from Phi;
-//   find the final LCP value by traversing the tree upwards.
 
 fn main() {
     let seq_1 = vec![
