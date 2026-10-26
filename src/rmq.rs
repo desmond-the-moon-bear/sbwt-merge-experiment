@@ -1,14 +1,15 @@
 // https://codeforces.com/blog/entry/78931
 
 pub const BLOCK_SIZE: usize = usize::BITS as usize;
-pub struct RangeMinimumSupport {
+pub struct RangeMinimumQuery {
+    name_lengths: Vec<usize>,
     values: Vec<usize>,
     masks: Vec<usize>,
     sparse_table: Vec<usize>,
 }
 
-impl RangeMinimumSupport {
-    pub fn new(values: Vec<usize>) -> RangeMinimumSupport {
+impl RangeMinimumQuery {
+    pub fn new(name_lengths: Vec<usize>, values: Vec<usize>) -> RangeMinimumQuery {
         let length = values.len();
         let mut masks  = Vec::<usize>::with_capacity(length);
         let mut sparse_table = vec![0_usize; length];
@@ -57,7 +58,8 @@ impl RangeMinimumSupport {
             row += 1;
         }
 
-        RangeMinimumSupport {
+        RangeMinimumQuery {
+            name_lengths,
             values,
             sparse_table,
             masks,
@@ -123,6 +125,15 @@ impl RangeMinimumSupport {
         std::mem::swap(&mut self.values, &mut values);
         values
     }
+
+    pub fn name_lengths(&self) -> &[usize] {
+        &self.name_lengths
+    }
+
+    pub fn swap_name_lengths(&mut self, mut name_lengths: Vec<usize>) -> Vec<usize> {
+        std::mem::swap(&mut self.name_lengths, &mut name_lengths);
+        name_lengths
+    }
 }
 
 #[cfg(test)]
@@ -132,7 +143,7 @@ mod tests {
     #[test]
     fn rmq() {
         let values = (1..=512).collect::<Vec<usize>>();
-        let rms = RangeMinimumSupport::new(values.clone());
+        let rms = RangeMinimumQuery::new(vec![], values.clone());
         for i in 0..512 {
             for j in i..512 {
                 let mut real_min_value = 1000;
