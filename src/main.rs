@@ -2,7 +2,7 @@
 
 pub mod rmq;
 
-use rmq::RangeMinimumSupport;
+use rmq::RangeMinimumSupport as RMS;
 
 use sbwt::BuildByLibsais;
 use sbwt::SbwtIndex;
@@ -43,9 +43,11 @@ where
 
     let mut order = vec![0_usize; tree.len()];
     let mut lcp = vec![0_usize; tree.len()];
-    let mut rmq = RangeMinimumSupport::with_capacity(tree.len());
+    let mut alphabet_lcp = Vec::with_capacity(tree.len());
+    alphabet_lcp.extend_from_slice(&[0; 5]);
+    let mut alphabet_rms = RMS::new(alphabet_lcp);
     let mut bucket_buffer = vec![];
-    sort_tree(&mut tree, &mut order, &mut lcp, &mut rmq, &mut bucket_buffer, 5, 1, sbwt_1.k());
+    sort_tree(&mut tree, &mut order, &mut alphabet_rms, &mut bucket_buffer, 5, 1, sbwt_1.k());
 
     let mut kmer_buffer = vec![0_u8; sbwt_1.k()];
     for &tree_index in &order {
@@ -147,14 +149,19 @@ const EXTRA_BUFFER_SPACE: usize = 1;
 fn sort_tree(
     tree: &mut [Node],
     order: &mut [usize],
-    lcp: &mut [usize],
-    rmq: &mut RangeMinimumSupport,
+    input_names: &mut RMS,
     bucket_buffer: &mut Vec<usize>,
     alpha: usize,
     depth: usize,
     k: usize
-) {
+) -> RMS {
     let n = tree.len();
+
+    // The caller should allocate the entire lcp buffer.
+    let input_names_buffer = input_names.values().to_vec();
+    let mut output_lcp_values_buffer = input_names.swap_values(input_names_buffer);
+    output_lcp_values_buffer.clear();
+    assert!(output_lcp_values_buffer.capacity() >= n);
 
     // Step 0: count the nodes at the different depths.
     let mut modulo_counts = [0_usize; 3];
@@ -229,22 +236,41 @@ fn sort_tree(
     radix_pass(tree, &sample_suffix_array, &mut sample_indices,      1, bucket_buffer, alpha);
     radix_pass(tree, &sample_indices,      &mut sample_suffix_array, 0, bucket_buffer, alpha);
 
+    let mut sample_lcp = Vec::<usize>::with_capacity(sample_count);
+
     // Step 1.1: generate new names for the samples
     let null_alpha = alpha + 1;
-    let mut tuple_name: (usize, usize, usize) = (null_alpha, null_alpha, null_alpha);
+    let mut tuple_name: [usize; 3] = [null_alpha, null_alpha, null_alpha];
     let mut name = 0;
     for i in 0..sample_count {
         let index_in_tree = sample_suffix_array[i];
-        let sampled_node_tuple_name = (
+        let sampled_node_tuple_name = [
             tree[climb(tree, index_in_tree, 0)].name,
             tree[climb(tree, index_in_tree, 1)].name,
             tree[climb(tree, index_in_tree, 2)].name,
-        );
-
-        // TODO: store preliminary LCP values for the sampled nodes.
+        ];
 
         if tuple_name != sampled_node_tuple_name {
             name += 1;
+
+            if tuple_name[0] == null_alpha {
+                sample_lcp.push(0);
+            } else {
+                let mut lcp = 0;
+                #[allow(clippy::needless_range_loop)]
+                for index in 0..tuple_name.len() {
+                    let sampled_input_name = sampled_node_tuple_name[index] - 1;
+                    let previous_input_name = tuple_name[index] - 1;
+                    if previous_input_name == sampled_input_name {
+                        lcp += depth;
+                    } else {
+                        lcp += input_names.query(previous_input_name, sampled_input_name);
+                        break;
+                    }
+                }
+                sample_lcp.push(lcp);
+            }
+
             tuple_name = sampled_node_tuple_name;
         }
         let index_in_sample_tree = tree_to_sample_tree_mapping[index_in_tree];
@@ -252,20 +278,26 @@ fn sort_tree(
         sample_indices[i] = index_in_sample_tree;
     }
 
+    let mut sample_names_rms = RMS::new(sample_lcp);
+
     // Step 1.2: check whether the names are unique.
     if name < sample_tree.len() && depth < k {
         let alpha = name;
         
-        // TODO: calculates correct LCP values? (and in turn rmq would be correct as well?)
-        sort_tree(&mut sample_tree, &mut sample_indices, lcp, rmq, bucket_buffer, alpha, depth * 3, k);
+        sample_names_rms = sort_tree(
+            &mut sample_tree,
+            &mut sample_indices,
+            &mut sample_names_rms,
+            bucket_buffer,
+            alpha,
+            depth * 3, k
+        );
 
         #[allow(clippy::needless_range_loop)]
         for i in 0..sample_count {
             let index_in_sample_tree = sample_indices[i];
             sample_tree[index_in_sample_tree].name = i + 1;
         }
-    } else {
-        // TODO: update rmq with the new lcp values.
     }
 
     // Step 2: sort residual indices.
@@ -380,9 +412,65 @@ fn sort_tree(
         sample_i += 1;
         write_i += 1;
     }
+
+    RMS::new(vec![])
 }
 
-struct LevelAncestorSupport;
+#[allow(clippy::too_many_arguments)]
+fn calculate_lcp(
+    tree: &[Node],
+    tree_to_sample_tree_mapping: &[usize],
+    sample_tree: &[Node],
+    input_names: &RMS,
+    sample_names: &RMS,
+    depth: usize,
+    residual_modulo: usize,
+    previous_node: usize,
+    current_node: usize,
+) -> usize {
+    #[inline]
+    fn lcp_from_tree(tree: &[Node], rms: &RMS, smaller_node: usize, greater_node: usize) -> usize {
+        let smaller_node_name = tree[smaller_node].name - 1;
+        let greater_node_name = tree[greater_node].name - 1;
+        rms.query(smaller_node_name, greater_node_name)
+    }
+
+    let mut lcp = 0;
+    let previous_node_modulo = tree[previous_node].depth % 3;
+    let current_node_modulo = tree[current_node].depth % 3;
+
+    if previous_node_modulo != residual_modulo && current_node_modulo != residual_modulo {
+        let previous_sample_index = tree_to_sample_tree_mapping[previous_node];
+        let current_sample_index  = tree_to_sample_tree_mapping[current_node];
+        return lcp_from_tree(
+            sample_tree,
+            sample_names,
+            previous_sample_index,
+            current_sample_index
+        );
+    }
+
+    if previous_node_modulo == residual_modulo && current_node_modulo == residual_modulo {
+        let previous_name = tree[previous_node].name - 1;
+        let current_name = tree[current_node].name - 1;
+        if previous_name == current_name {
+            let previous_parent_sample_index = tree_to_sample_tree_mapping[tree[previous_node].parent];
+            let current_parent_sample_index  = tree_to_sample_tree_mapping[tree[previous_node].parent];
+            return depth + lcp_from_tree(
+                sample_tree,
+                sample_names,
+                previous_parent_sample_index,
+                current_parent_sample_index,
+            );
+        } else {
+            return input_names.query(previous_name, current_name);
+        }
+    }
+
+    // TODO: finish this...
+
+    0
+}
 
 fn main() {
     let seq_1 = vec![
