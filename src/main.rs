@@ -4,6 +4,7 @@ pub mod rmq;
 
 use rmq::RangeMinimumQuery as RMQ;
 
+use bitvec::prelude::*;
 use sbwt::BuildByLibsais;
 use sbwt::SbwtIndex;
 use sbwt::SubsetSeq;
@@ -17,16 +18,28 @@ struct Node {
     name: usize,
 }
 
+#[derive(Default, Debug)]
+struct MappingInformation {
+    sbwt_to_tree: Vec<usize>,
+    kmer_length: Vec<usize>,
+}
+
+impl MappingInformation {
+    fn new(length: usize) -> Self {
+        Self {
+            sbwt_to_tree: vec![0; length],
+            kmer_length:  vec![0; length],
+        }
+    }
+}
+
 struct LongestCommonExtension;
 fn longest_common_extension<SS1, SS2>(sbwt_1: &SbwtIndex<SS1>, sbwt_2: &SbwtIndex<SS2>) -> LongestCommonExtension
 where
     SS1: SubsetSeq,
     SS2: SubsetSeq,
 {
-    // let tree: [Node; ..] = ;
-    //     identity         = [ (merged common) root, sbwt1 nodes in preorder, sbwt2 nodes in preorder ];
-    // let loop_anchors     = [ 0, index in identity ];
-    // let length           = [..]; // to identify dummy k-mers?
+    assert_eq!(sbwt_1.k(), sbwt_2.k());
 
     // Merge the root of the two SBWT indices.
     let sbwt_1_size = sbwt_1.n_sets();
@@ -36,18 +49,26 @@ where
     tree.push(Node::default());
     tree[0].name = 1;
 
+    let mut sbwt_1_mapping = MappingInformation::new(sbwt_1_size);
+    let mut sbwt_2_mapping = MappingInformation::new(sbwt_2_size);
+    let mut sbwt_1_mapped = bitvec![0; sbwt_1_size];
+    let mut sbwt_2_mapped = bitvec![0; sbwt_2_size];
+
     let mut stack = Vec::<(usize, usize, usize)>::new();
-    enumerate_tree_from_sbwt(sbwt_1, &mut stack, &mut tree, 0);
-    enumerate_tree_from_sbwt(sbwt_2, &mut stack, &mut tree, sbwt_1_size);
+    emit_tree_from_sbwt      (sbwt_1, &mut stack, &mut tree, &mut sbwt_1_mapping, &mut sbwt_1_mapped, 0);
+    emit_components_from_sbwt(sbwt_1, &mut stack, &mut tree, &mut sbwt_1_mapping, &mut sbwt_1_mapped, 0);
+    emit_tree_from_sbwt      (sbwt_2, &mut stack, &mut tree, &mut sbwt_2_mapping, &mut sbwt_2_mapped, sbwt_1_size);
+    emit_components_from_sbwt(sbwt_2, &mut stack, &mut tree, &mut sbwt_2_mapping, &mut sbwt_2_mapped, sbwt_1_size);
 
     let mut order = vec![0_usize; tree.len()];
-    let mut lcp = vec![0_usize; tree.len()];
-    let mut alphabet_lcp        = Vec::with_capacity(tree.len());
+
+    let mut alphabet_lcp          = Vec::with_capacity(tree.len());
     let mut alphabet_name_lengths = Vec::with_capacity(tree.len());
-    alphabet_lcp       .extend_from_slice(&[0; 5]);
+    alphabet_lcp         .extend_from_slice(&[0; 5]);
     alphabet_name_lengths.push(0);
     alphabet_name_lengths.extend_from_slice(&[1; 4]);
     let mut alphabet_rmq = RMQ::new(alphabet_name_lengths, alphabet_lcp);
+
     let mut bucket_buffer = vec![];
     let rmq = sort_tree(&mut tree, &mut order, &mut alphabet_rmq, &mut bucket_buffer, 5, 1, sbwt_1.k());
     let lcp_array = rmq.values();
@@ -69,41 +90,191 @@ where
             let kmer = str::from_utf8(&kmer_buffer).unwrap();
             println!("[2:{:05}] [{:3}] {} [{:3}]", node_index, name_length, kmer, lcp);
         }
-   }
+    }
 
     LongestCommonExtension
 }
 
-fn enumerate_tree_from_sbwt<SS: SubsetSeq>(
+fn inedge_name(sbwt_index: usize, c_array: &[usize]) -> usize {
+    for character_index in (0..c_array.len()).rev() {
+        if sbwt_index >= c_array[character_index] {
+            return character_index + 2;
+        }
+    }
+    1
+}
+
+fn emit_tree_from_sbwt<SS: SubsetSeq>(
     sbwt: &SbwtIndex<SS>,
     stack: &mut Vec<(usize, usize, usize)>,
     tree: &mut Vec<Node>,
+    mapping: &mut MappingInformation,
+    mapped: &mut BitVec,
     offset: usize
 ) {
-    let alphabet = sbwt.alphabet().iter();
+    let c_array = sbwt.sbwt().get_C_array();
+    let alphabet = sbwt.alphabet();
+    let k = sbwt.k();
+
+    stack.clear();
     stack.push((0, 0, 1));
-    while let Some((sbwt_index, tree_parent, name)) = stack.pop() {
+    while let Some((sbwt_index, tree_parent, length)) = stack.pop() {
         let tree_index = if sbwt_index != 0 {
             let index = tree.len();
             tree.push(Node {
                 id: sbwt_index + offset,
                 depth: 0,
                 parent: tree_parent,
-                name,
+                name: inedge_name(sbwt_index, &c_array),
             });
             index
         } else {
             0
         };
 
-        for (character_index, &character) in alphabet.clone().enumerate().rev() {
+        mapped.set(sbwt_index, true);
+        mapping.sbwt_to_tree[sbwt_index] = tree_index;
+        mapping.kmer_length [sbwt_index] = length;
+
+        for (character_index, &character) in alphabet.iter().enumerate() {
             let option_range = sbwt.search_from(sbwt_index..sbwt_index + 1, &[character]);
             if let Some(range) = option_range {
-                stack.push((range.start, tree_index, character_index + 2));
+                // $ is 1; A is 2; C is 3 and so on...
+                stack.push((range.start, tree_index, (length + 1).min(k))); 
             }
         }
     }
 }
+
+#[allow(clippy::ptr_arg)]
+fn emit_components_from_sbwt<SS: SubsetSeq>(
+    sbwt: &SbwtIndex<SS>,
+    stack: &mut Vec<(usize, usize, usize)>,
+    tree: &mut Vec<Node>,
+    mapping: &mut MappingInformation,
+    mapped: &mut BitVec,
+    offset: usize,
+) {
+    let c_array = sbwt.sbwt().get_C_array();
+    let alphabet = sbwt.alphabet();
+    let k = sbwt.k();
+    let sbwt_size = sbwt.n_sets();
+
+    let mut explored = bitvec![0; sbwt_size];
+
+    for current_sbwt_index in 1..sbwt_size {
+        if mapped[current_sbwt_index] {
+            continue;
+        }
+
+        let mut next_child = 0;
+        let mut found_loop = false;
+        stack.clear();
+
+        stack.push((current_sbwt_index, 0, 0));
+
+        while let Some((sbwt_index, mut next_edge, _)) = stack.pop() {
+            if next_edge >= alphabet.len() {
+                continue;
+            }
+
+            next_child = 0;
+            while next_edge < alphabet.len() {
+                let option_range = sbwt.search_from(sbwt_index..sbwt_index + 1, &[alphabet[next_edge]]);
+                next_edge += 1;
+                if let Some(range) = option_range && !explored[range.start] {
+                    next_child = range.start;
+                    break;
+                }
+            }
+
+            if next_child > 0 {
+                stack.push((sbwt_index, next_edge, 0));
+                if next_child == current_sbwt_index {
+                    found_loop = true;
+                    break;
+                }
+                explored.set(next_child, true);
+                stack.push((next_child, 0, 0));
+            }
+        }
+
+        explored.set(current_sbwt_index, true);
+
+        if !found_loop {
+            assert!(stack.is_empty());
+            continue;
+        }
+
+        assert!(!stack.is_empty());
+
+        // First instance of the necklace:
+        let mut parent = 0;
+        let loop_length = stack.len();
+        let to_skip = if loop_length >= k {
+            stack.len() - k + 1
+        } else {
+            0
+        };
+        for &(sbwt_index, _, _) in stack.iter().skip(to_skip) {
+            let tree_index = tree.len();
+            tree.push(Node {
+                id: sbwt_index + offset,
+                depth: 0,
+                parent,
+                name: inedge_name(sbwt_index, &c_array),
+            });
+            parent = tree_index;
+        }
+
+        // Second instance of the necklace:
+        for &(sbwt_index, _, _) in stack.iter() {
+            mapped.set(sbwt_index, true);
+            let tree_index = tree.len();
+            tree.push(Node {
+                id: sbwt_index + offset,
+                depth: 0,
+                parent,
+                name: inedge_name(sbwt_index, &c_array),
+            });
+            mapping.sbwt_to_tree[sbwt_index] = tree_index;
+            parent = tree_index;
+        }
+
+        // Explore the subtrees of the necklace:
+        stack.clear();
+        stack.push((current_sbwt_index, 0, 0));
+        while let Some((sbwt_index, tree_parent, name)) = stack.pop() {
+            let attachment_point = if mapped[sbwt_index] {
+                if loop_length >= k {
+                    mapping.sbwt_to_tree[sbwt_index]
+                } else {
+                    0
+                }
+            } else {
+                let index = tree.len();
+                tree.push(Node {
+                    id: sbwt_index + offset,
+                    depth: 0,
+                    parent: tree_parent,
+                    name,
+                });
+                mapped.set(sbwt_index, true);
+                mapping.sbwt_to_tree[sbwt_index] = index;
+                // TODO: mapping.kmer_length[sbwt_index] = k + todo!() as usize;
+                index
+            };
+
+            for (character_index, &character) in alphabet.iter().enumerate() {
+                let option_range = sbwt.search_from(sbwt_index..sbwt_index + 1, &[character]);
+                if let Some(range) = option_range && range.start != current_sbwt_index {
+                    stack.push((range.start, attachment_point, character_index + 2)); 
+                }
+            }
+        }
+    }
+}
+
 
 #[inline]
 fn climb(tree: &[Node], node: usize, offset: usize) -> usize {
@@ -150,7 +321,6 @@ fn radix_pass(
 const EXTRA_BUFFER_SPACE: usize = 1;
 
 // alpha - alphabet size
-#[allow(clippy::only_used_in_recursion)]
 #[allow(clippy::too_many_arguments)]
 fn sort_tree(
     tree: &mut [Node],
@@ -165,9 +335,9 @@ fn sort_tree(
 
     // The caller should allocate the entire buffer as it probably doesn't know how many names the
     // samples will divide into.
-    let input_names_buffer           = input_names.values().to_vec();
+    let input_names_buffer             = input_names.values().to_vec();
     let input_name_lengths_buffer      = input_names.name_lengths().to_vec();
-    let mut output_lcp_values_buffer = input_names.swap_values(input_names_buffer);
+    let mut output_lcp_values_buffer   = input_names.swap_values(input_names_buffer);
     let mut output_name_lengths_buffer = input_names.swap_name_lengths(input_name_lengths_buffer);
     output_lcp_values_buffer.clear();
     output_name_lengths_buffer.clear();
@@ -372,7 +542,6 @@ fn sort_tree(
                     &sample_tree,
                     input_names,
                     &sample_names,
-                    rank,
                     residual_modulo,
                     previous_node,
                     current_node
@@ -476,7 +645,6 @@ fn calculate_lcp_and_name_length(
     sample_tree: &[Node],
     input_names: &RMQ,
     sample_names: &RMQ,
-    rank: usize,
     residual_modulo: usize,
     previous_node: usize,
     current_node: usize,
@@ -592,10 +760,12 @@ fn main() {
     let seq_1 = seqs![
         b"AACCCCC",
         b"AAGGGGG",
-        b"CCTTTTT",
         b"TTCCCCG",
+        b"GCGCGCGCG",
+        b"GCGCGCA",
+        b"GCGCGCT",
     ];
-    let (sbwt_1, _) = BuildByLibsais::new_from_vecs(&seq_1, 7)
+    let (mut sbwt_1, _) = BuildByLibsais::new_from_vecs(&seq_1, 7)
         .build_select_support(true)
         .run();
 
@@ -604,7 +774,7 @@ fn main() {
         b"CCGGGGG",
         b"CCTTTTT",
     ];
-    let (sbwt_2, _) = BuildByLibsais::new_from_vecs(&seq_2, 7)
+    let (mut sbwt_2, _) = BuildByLibsais::new_from_vecs(&seq_2, 7)
         .build_select_support(true)
         .run();
 
