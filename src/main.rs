@@ -1,5 +1,11 @@
 #![allow(unused)]
 
+macro_rules! seqs {
+    ($($seq:expr),* $(,)?) => {
+        vec![$($seq.to_vec(),)*]
+    };
+}
+
 pub mod rmq;
 pub mod level;
 
@@ -34,8 +40,17 @@ impl MappingInformation {
     }
 }
 
-struct LongestCommonExtension;
-fn longest_common_extension<SS1, SS2>(sbwt_1: &SbwtIndex<SS1>, sbwt_2: &SbwtIndex<SS2>) -> LongestCommonExtension
+struct TreeDecompositionRMQ {
+    sbwt_1_mapping: MappingInformation,
+    sbwt_2_mapping: MappingInformation,
+    // The names in the tree should be the inverse permutation of the order vector. That is from
+    // the sbwt -> tree mapping we can get the range for the range minimum queries.
+    tree: Vec<Node>,
+    // order: Vec<usize>,
+    rmq: RMQ,
+}
+
+fn range_minimum_query<SS1, SS2>(sbwt_1: &SbwtIndex<SS1>, sbwt_2: &SbwtIndex<SS2>) -> TreeDecompositionRMQ
 where
     SS1: SubsetSeq,
     SS2: SubsetSeq,
@@ -76,29 +91,46 @@ where
     let mut bucket_buffer = vec![];
     let rmq = sort_tree(&mut tree, &mut order, &mut alphabet_rmq, &mut bucket_buffer, 5, 1, sbwt_1.k());
 
-    // for (index, node) in tree.iter().enumerate() {
-    //     println!("{:3} <- {:3} : {}", node.parent, index, node.depth);
+    for (index, node) in tree.iter().enumerate() {
+        println!("{:3} <- {:3} : {}", node.parent, index, node.depth);
+    }
+
+    // let lcp_array = rmq.values();
+    // let name_lengths_array = rmq.name_lengths();
+    // let mut kmer_buffer = vec![0_u8; sbwt_1.k()];
+    // for (index, &tree_index) in order.iter().enumerate() {
+    //     let node_index = tree[tree_index].id;
+    //     kmer_buffer.clear();
+    //     let lcp = lcp_array[index];
+    //     let name_length = name_lengths_array[index];
+    //     if node_index < sbwt_1_size {
+    //         sbwt_1.push_kmer_to_vec(node_index, &mut kmer_buffer);
+    //         let kmer = str::from_utf8(&kmer_buffer).unwrap();
+    //         println!("[1:{:05}] [{:3}] {} [{:3}]", node_index, name_length, kmer, lcp);
+    //     } else {
+    //         let node_index = node_index - sbwt_1_size;
+    //         sbwt_2.push_kmer_to_vec(node_index, &mut kmer_buffer);
+    //         let kmer = str::from_utf8(&kmer_buffer).unwrap();
+    //         println!("[2:{:05}] [{:3}] {} [{:3}]", node_index, name_length, kmer, lcp);
+    //     }
     // }
 
-    let lcp_array = rmq.values();
-    let name_lengths_array = rmq.name_lengths();
-    let mut kmer_buffer = vec![0_u8; sbwt_1.k()];
-    for (index, &tree_index) in order.iter().enumerate() {
-        let node_index = tree[tree_index].id;
-        kmer_buffer.clear();
-        let lcp = lcp_array[index];
-        let name_length = name_lengths_array[index];
-        if node_index < sbwt_1_size {
-            sbwt_1.push_kmer_to_vec(node_index, &mut kmer_buffer);
-            let kmer = str::from_utf8(&kmer_buffer).unwrap();
-            println!("[1:{:05}] [{:3}] {} [{:3}]", node_index, name_length, kmer, lcp);
-        } else {
-            let node_index = node_index - sbwt_1_size;
-            sbwt_2.push_kmer_to_vec(node_index, &mut kmer_buffer);
-            let kmer = str::from_utf8(&kmer_buffer).unwrap();
-            println!("[2:{:05}] [{:3}] {} [{:3}]", node_index, name_length, kmer, lcp);
-        }
+    TreeDecompositionRMQ {
+        sbwt_1_mapping,
+        sbwt_2_mapping,
+        tree,
+        // order,
+        rmq,
     }
+}
+
+struct LongestCommonExtension;
+fn longest_common_extension<SS1, SS2>(sbwt_1: &SbwtIndex<SS1>, sbwt_2: &SbwtIndex<SS2>) -> LongestCommonExtension
+where
+    SS1: SubsetSeq,
+    SS2: SubsetSeq,
+{
+    let tree_decomposition_rmq = range_minimum_query(sbwt_1, sbwt_2);
 
     LongestCommonExtension
 }
@@ -756,12 +788,6 @@ fn calculate_lcp_and_name_length(
         current_parent_parent_sample_index,
     );
     (lcp, name_length)
-}
-
-macro_rules! seqs {
-    ($($seq:expr),* $(,)?) => {
-        vec![$($seq.to_vec(),)*]
-    };
 }
 
 fn main() {

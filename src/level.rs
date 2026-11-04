@@ -7,7 +7,7 @@ use super::Node;
 struct NodeInfo {
     ladder_start: usize,
     ladder_length: usize,
-    euler_index: usize,
+    euler_index: i64,
     deepest_leaf: usize,
 }
 
@@ -28,25 +28,191 @@ impl LevelAncestorSupport {
 
         let mut stack = Vec::<usize>::new();
 
-        // simulate dfs on the tree and find the deepest leaves
-        // populate the jump pointers
+        let mut euler_index: i64 = 0;
+        #[inline(always)]
+        fn push_jump_pointers(jump_pointers: &mut Vec<(usize, usize)>, stack: &[usize], euler_index: i64) {
+            let largest_power_dividing = euler_index.isolate_lowest_one();
+            let index_in_stack_1 = 0.max(stack.len() as i64 - 1 - 2 * largest_power_dividing);
+            let index_in_stack_2 = 0.max(stack.len() as i64 - 1 - 4 * largest_power_dividing);
+            let jump_1 = stack[index_in_stack_1 as usize];
+            let jump_2 = stack[index_in_stack_2 as usize];
+            jump_pointers.push((jump_1, jump_2));
+        }
+
         for (node_index, node) in tree.iter().enumerate() {
-            while let Some(last) = stack.last() && *last > node.parent {
-                // update deepest leaf
-                stack.pop();
+            let mut previous_deepest_leaf = tree_size;
+            while let Some(&top) = stack.last() && top >= node.parent {
+                if previous_deepest_leaf == tree_size {
+                    previous_deepest_leaf = auxiliary_info[top].deepest_leaf;
+                    // We have already pushed the jump pointers for this instance of the node in
+                    // the euler tour.
+                } else {
+                    let previous_depth = tree[previous_deepest_leaf].depth;
+                    let current_deepest_leaf = auxiliary_info[top].deepest_leaf;
+                    let current_depth = tree[current_deepest_leaf].depth;
+                    if previous_depth > current_depth {
+                        auxiliary_info[top].deepest_leaf = previous_deepest_leaf;
+                    }
+                    previous_deepest_leaf = auxiliary_info[top].deepest_leaf;
+
+                    push_jump_pointers(&mut jump_pointers, &stack, euler_index);
+                }
+                
+                if top > node.parent {
+                    stack.pop();
+                } else {
+                    break;
+                }
+                euler_index += 1;
             }
 
-            stack.push(node_index);
+            debug_assert!(stack.is_empty() || *stack.last().unwrap() == node.parent);
 
+            stack.push(node_index);
+            euler_index += 1;
+
+            auxiliary_info.push(NodeInfo {
+                ladder_start: 0,
+                ladder_length: 0,
+                euler_index,
+                deepest_leaf: node_index,
+            });
+
+            push_jump_pointers(&mut jump_pointers, &stack, euler_index);
+        }
+
+        let mut previous_deepest_leaf = tree_size;
+        while let Some(&top) = stack.last() {
+            if previous_deepest_leaf == tree_size {
+                previous_deepest_leaf = auxiliary_info[top].deepest_leaf;
+            } else {
+                let previous_depth = tree[previous_deepest_leaf].depth;
+                let current_deepest_leaf = auxiliary_info[top].deepest_leaf;
+                let current_depth = tree[current_deepest_leaf].depth;
+                if previous_depth > current_depth {
+                    auxiliary_info[top].deepest_leaf = previous_deepest_leaf;
+                }
+                previous_deepest_leaf = auxiliary_info[top].deepest_leaf;
+                push_jump_pointers(&mut jump_pointers, &stack, euler_index);
+            }
+            stack.pop();
+            euler_index += 1;
         }
  
-        // calculate the ladders
+        for (node_index, node) in tree.iter().enumerate() {
+            let parent = node.parent;
+            let parent_deepest_leaf = auxiliary_info[parent].deepest_leaf;
+            let deepest_leaf = auxiliary_info[node_index].deepest_leaf;
+            if node_index == 0 || deepest_leaf != parent_deepest_leaf {
+                // Each deepest leaf will be initialised once so there's no need to allocate a
+                // buffer for each ladder.
 
-        todo!()
+                let node_info = &mut auxiliary_info[deepest_leaf];
+                node_info.ladder_start = ladder_values.len();
+                let deepest_leaf_depth = tree[deepest_leaf].depth;
+                let ladder_length = ((deepest_leaf_depth - node.depth) * 2).min(deepest_leaf_depth); 
+                node_info.ladder_length = ladder_length;
+
+                let mut ladder_rung = tree[deepest_leaf].parent;
+                for i in 0..ladder_length {
+                    ladder_values.push(ladder_rung);
+                    ladder_rung = tree[ladder_rung].parent;
+                }
+            }
+        }
+
+        LevelAncestorSupport {
+            jump_pointers,
+            ladder_values,
+            auxiliary_info,
+        }
     }
 
-    fn query(node: usize, depth: usize) -> usize {
-        todo!()
+    fn query(&self, tree: &[Node], node: usize, climb: usize) -> usize {
+        match climb {
+            0 => node,
+            1 => tree[node].parent,
+            2 => tree[tree[node].parent].parent,
+            _ => {
+                let most_significant_bit = usize::BITS - 1 - (climb / 3).leading_zeros();
+                let target_power_of_2 = 1_i64 << most_significant_bit;
+                let euler_index_of_node = self.auxiliary_info[node].euler_index;
+                let euler_index = (euler_index_of_node & (-target_power_of_2)) | target_power_of_2;
+
+                // Euler index is 1 based.
+                let (jump_1, jump_2) = self.jump_pointers[euler_index as usize - 1];
+                let leaf = if tree[node].depth - tree[jump_2].depth <= climb {
+                    self.auxiliary_info[jump_2].deepest_leaf
+                } else {
+                    self.auxiliary_info[jump_1].deepest_leaf
+                };
+
+                let ladder_start = self.auxiliary_info[leaf].ladder_start;
+                let rungs = climb + tree[leaf].depth - tree[node].depth;
+                debug_assert!(rungs <= self.auxiliary_info[leaf].ladder_length);
+
+                // ladder values do not contain the node itself
+                self.ladder_values[ladder_start + rungs - 1]
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use crate::*;
+    use bitvec::prelude::*;
+    use sbwt::BuildByLibsais;
+    use sbwt::SbwtIndex;
+    use sbwt::SubsetSeq;
+    use sbwt::SubsetMatrix;
+
+    fn level_ancestor_query(tree: &[Node], mut node: usize, mut climb: usize) -> usize {
+        while climb > 0 {
+            node = tree[node].parent;
+            climb -= 1;
+        }
+        node
+    }
+
+    #[test]
+    fn level_ancestor_test() {
+        let seq_1 = seqs![
+            b"AACCCCC",
+            b"AAGGGGG",
+            b"TTCCCCG",
+            b"GCGCGCGCG",
+            b"GCGCGCA",
+            b"GCGCGCT",
+        ];
+        let (mut sbwt_1, _) = BuildByLibsais::new_from_vecs(&seq_1, 7)
+            .build_select_support(true)
+            .run();
+
+        let seq_2 = seqs![
+            b"AACCCCC",
+            b"CCGGGGG",
+            b"CCTTTTT",
+            b"ACACCACCCACCCC",
+            b"ACACCAGGGAGGGG",
+            b"ACAGGAGGGAGGGG",
+        ];
+        let (mut sbwt_2, _) = BuildByLibsais::new_from_vecs(&seq_2, 7)
+            .build_select_support(true)
+            .run();
+
+        let decomposition = range_minimum_query(&sbwt_1, &sbwt_2);
+        let la = LevelAncestorSupport::new(&decomposition.tree);
+
+        for (node_index, node) in decomposition.tree.iter().enumerate() {
+            let max_depth = node.depth;
+            for climb in 0..max_depth {
+                let invariant = level_ancestor_query(&decomposition.tree, node_index, climb);
+                let found     = la.query            (&decomposition.tree, node_index, climb);
+                assert_eq!(invariant, found, "node_index: {}; climb: {}", node_index, climb);
+            }
+        }
     }
 }
 
