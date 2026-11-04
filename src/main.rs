@@ -1,6 +1,7 @@
 #![allow(unused)]
 
 pub mod rmq;
+pub mod level;
 
 use rmq::RangeMinimumQuery as RMQ;
 
@@ -60,6 +61,9 @@ where
     emit_tree_from_sbwt      (sbwt_2, &mut stack, &mut tree, &mut sbwt_2_mapping, &mut sbwt_2_mapped, sbwt_1_size);
     emit_components_from_sbwt(sbwt_2, &mut stack, &mut tree, &mut sbwt_2_mapping, &mut sbwt_2_mapped, sbwt_1_size);
 
+    // let mut byte_names = Vec::<u8>::with_capacity(tree.len());
+    // byte_names.extend(tree.iter().map(|node| node.name as u8));
+
     let mut order = vec![0_usize; tree.len()];
 
     let mut alphabet_lcp          = Vec::with_capacity(tree.len());
@@ -71,9 +75,13 @@ where
 
     let mut bucket_buffer = vec![];
     let rmq = sort_tree(&mut tree, &mut order, &mut alphabet_rmq, &mut bucket_buffer, 5, 1, sbwt_1.k());
+
+    // for (index, node) in tree.iter().enumerate() {
+    //     println!("{:3} <- {:3} : {}", node.parent, index, node.depth);
+    // }
+
     let lcp_array = rmq.values();
     let name_lengths_array = rmq.name_lengths();
-
     let mut kmer_buffer = vec![0_u8; sbwt_1.k()];
     for (index, &tree_index) in order.iter().enumerate() {
         let node_index = tree[tree_index].id;
