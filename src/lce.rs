@@ -129,6 +129,8 @@ impl LongestCommonExtension {
 
             let loop_2_length = self.rmq.tree[node_2].depth + k - branch_identifier_2;
             let depth_in_loop_2 = self.rmq.tree[node_2].depth - loop_2_length;
+            debug_assert!(loop_2_length + depth_in_loop_2 == self.rmq.tree[node_2].depth);
+
             // <---------> loop length
             //             <------> depth in loop
             // [] .. .. [] [] .. [] ..
@@ -230,7 +232,7 @@ impl LongestCommonExtension {
             debug_assert!(k < branch_identifier_1 && branch_identifier_1 < 2 * k);
         } else {
             node_1 = self.la_query(node_1, subtree_extension);
-            branch_identifier_1 = self.find_branch_identifier(node_1);
+            // branch_identifier_1 = self.find_branch_identifier(node_1);
             debug_assert!(2 * k <= branch_identifier_1);
         }
 
@@ -240,7 +242,7 @@ impl LongestCommonExtension {
             debug_assert!(k < branch_identifier_2 && branch_identifier_2 < 2 * k);
         } else {
             node_2 = self.la_query(node_2, subtree_extension);
-            branch_identifier_2 = self.find_branch_identifier(node_2);
+            // branch_identifier_2 = self.find_branch_identifier(node_2);
             debug_assert!(2 * k <= branch_identifier_2);
         }
 
@@ -308,10 +310,70 @@ impl LongestCommonExtension {
         debug_assert!(k < branch_identifier_1 && branch_identifier_1 < 2 * k);
         debug_assert!(2 * k <= branch_identifier_2);
 
+        let (rmq_start, rmq_end) = self.find_rmq_arguments(node_1, node_2);
+        let mut subtree_extension = self.rmq.rmq.query(rmq_start, rmq_end);
+
+        if subtree_extension < self.rmq.tree[node_1].depth && subtree_extension < self.rmq.tree[node_2].depth {
+            let ordering = self.compare_ancestors(node_1, node_2, subtree_extension);
+            return (subtree_extension, ordering);
+        }
+
+        if subtree_extension < self.rmq.tree[node_1].depth || subtree_extension >= self.rmq.tree[node_2].depth {
+            // (subtree_extension < self.rmq.tree[node_1].depth and subtree_extension >= self.rmq.tree[node_2].depth)
+            // or (subtree_extension >= self.rmq.tree[node_1].depth and subtree_extension >= self.rmq.tree[node_2].depth)
+            let jump_distance = if subtree_extension < self.rmq.tree[node_1].depth {
+                subtree_extension
+            } else {
+                let loop_1_length = self.rmq.tree[node_1].depth + k - branch_identifier_1;
+                self.rmq.tree[node_1].depth - loop_1_length // depth_in_loop_1
+            };
+            let node_1_jump = self.la_query(node_1, jump_distance);
+            let (node_1, branch_identifier_1) = self.find_canonic_node_and_branch_identifier(node_1_jump);
+            debug_assert!(k < branch_identifier_1 && branch_identifier_1 < 2 * k);
+
+            node_2 = branch_identifier_2 - 2 * k;
+            branch_identifier_2 = self.find_branch_identifier(node_2);
+            debug_assert!(k < branch_identifier_2 && branch_identifier_2 < 2 * k);
+
+            let (extension, ordering) = self.query_type_22(node_1, branch_identifier_1, node_2, branch_identifier_2);
+            if subtree_extension + extension >= k {
+                return (k, std::cmp::Ordering::Equal);
+            }
+            return (subtree_extension + extension, ordering);
+        }
+
+        // subtree_extension >= self.rmq.tree[node_1].depth and subtree_extension < self.rmq.tree[node_2].depth
+
         let loop_1_length = self.rmq.tree[node_1].depth + k - branch_identifier_1;
         let depth_in_loop_1 = self.rmq.tree[node_1].depth - loop_1_length;
 
-        todo!()
+        debug_assert!(loop_1_length + depth_in_loop_1 == self.rmq.tree[node_1].depth);
+        debug_assert!(self.rmq.tree[node_1].depth < self.rmq.tree[node_2].depth);
+
+        let sample_ancestor  = self.la_query(         node_2, depth_in_loop_1);
+        let shifted_ancestor = self.la_query(sample_ancestor, loop_1_length);
+        let (rmq_start, rmq_end) = self.find_rmq_arguments(sample_ancestor, shifted_ancestor);
+        let shift_extension = self.rmq.rmq.query(rmq_start, rmq_end);
+
+        let total_subtree_extension = shift_extension + depth_in_loop_1;
+        if total_subtree_extension < self.rmq.tree[node_2].depth {
+            // non-loop node === shifted ancestor
+            let ordering = self.compare_ancestors(sample_ancestor, shifted_ancestor, shift_extension);
+            return (total_subtree_extension, ordering);
+        }
+
+        let node_1_jump = self.la_query(node_1, depth_in_loop_1);
+        let (node_1, branch_identifier_1) = self.find_canonic_node_and_branch_identifier(node_1_jump);
+        debug_assert!(k < branch_identifier_1 && branch_identifier_1 < 2 * k);
+
+        node_2 = branch_identifier_2 - 2 * k;
+        branch_identifier_2 = self.find_branch_identifier(node_2);
+        debug_assert!(k < branch_identifier_2 && branch_identifier_2 < 2 * k);
+
+        let (loop_extension, ordering) = self.query_type_22(node_1, branch_identifier_1, node_2, branch_identifier_2);
+        debug_assert!(loop_extension + total_subtree_extension < k);
+
+        (loop_extension + total_subtree_extension, ordering)
     }
 
     fn query_type_22(
@@ -326,7 +388,46 @@ impl LongestCommonExtension {
         debug_assert!(k < branch_identifier_1 && branch_identifier_1 < 2 * k);
         debug_assert!(k < branch_identifier_2 && branch_identifier_2 < 2 * k);
 
-        todo!()
+        let mut loop_1_length   = self.rmq.tree[node_1].depth + k - branch_identifier_1;
+        let mut depth_in_loop_1 = self.rmq.tree[node_1].depth - loop_1_length;
+        let mut loop_2_length   = self.rmq.tree[node_2].depth + k - branch_identifier_2;
+        let mut depth_in_loop_2 = self.rmq.tree[node_2].depth - loop_2_length;
+
+        let (rmq_start, rmq_end) = self.find_rmq_arguments(node_1, node_2);
+        let initial_extension = self.rmq.rmq.query(rmq_start, rmq_end);
+
+        if initial_extension < self.rmq.tree[node_1].depth && initial_extension < self.rmq.tree[node_2].depth {
+            let ordering = self.compare_ancestors(node_1, node_2, initial_extension);
+            return (initial_extension, ordering);
+        }
+
+        if initial_extension >= self.rmq.tree[node_1].depth && initial_extension >= self.rmq.tree[node_2].depth {
+            return (k, std::cmp::Ordering::Equal);
+        }
+
+        let mut reverse = false;
+        if initial_extension >= self.rmq.tree[node_2].depth {
+            reverse = true;
+            std::mem::swap(&mut node_1,              &mut node_2);
+            std::mem::swap(&mut branch_identifier_1, &mut branch_identifier_2);
+            std::mem::swap(&mut loop_1_length,       &mut loop_2_length);
+            std::mem::swap(&mut depth_in_loop_1,     &mut depth_in_loop_2);
+        }
+
+        // (initial_extension >= self.rmq.tree[node_1].depth and initial_extension <  self.rmq.tree[node_2].depth)
+
+        let sample_ancestor  = self.find_canonic_node(self.la_query(         node_2, depth_in_loop_1));
+        let shifted_ancestor = self.find_canonic_node(self.la_query(sample_ancestor, loop_1_length));
+        let (rmq_start, rmq_end) = self.find_rmq_arguments(sample_ancestor, shifted_ancestor);
+        let shift_extension = self.rmq.rmq.query(rmq_start, rmq_end);
+        
+        // longer loop === shifted_ancestor
+        let mut ordering = self.compare_ancestors(sample_ancestor, shifted_ancestor, shift_extension);
+        if reverse {
+            ordering = ordering.reverse();
+        }
+
+        (shift_extension + depth_in_loop_1, ordering)
     }
 
     #[inline]
@@ -366,6 +467,34 @@ impl LongestCommonExtension {
         } else {
             sbwt_index -= self.offset;
             self.rmq.sbwt_2_mapping.branch_identifier[sbwt_index]
+        }
+    }
+
+    #[inline]
+    fn find_canonic_node(&self, node: usize) -> usize {
+        let mut sbwt_index = self.rmq.tree[node].id;
+        if sbwt_index < self.offset {
+            self.rmq.sbwt_1_mapping.sbwt_to_tree[sbwt_index]
+        } else {
+            sbwt_index -= self.offset;
+            self.rmq.sbwt_2_mapping.sbwt_to_tree[sbwt_index]
+        }
+    }
+
+    #[inline]
+    fn find_canonic_node_and_branch_identifier(&self, node: usize) -> (usize, usize) {
+        let mut sbwt_index = self.rmq.tree[node].id;
+        if sbwt_index < self.offset {
+            (
+                self.rmq.sbwt_1_mapping.sbwt_to_tree[sbwt_index],
+                self.rmq.sbwt_1_mapping.branch_identifier[sbwt_index]
+            )
+        } else {
+            sbwt_index -= self.offset;
+            (
+                self.rmq.sbwt_2_mapping.sbwt_to_tree[sbwt_index],
+                self.rmq.sbwt_2_mapping.branch_identifier[sbwt_index]
+            )
         }
     }
 }
