@@ -4,22 +4,22 @@
 use super::Node;
 
 #[derive(Debug)]
-struct NodeInfo {
-    ladder_start: usize,
-    ladder_length: usize,
-    euler_index: i64,
-    deepest_leaf: usize,
+pub struct NodeInfo {
+    pub ladder_start: usize,
+    pub ladder_length: usize,
+    pub euler_index: i64,
+    pub deepest_leaf: usize,
 }
 
 #[derive(Debug)]
-struct LevelAncestorSupport {
-    jump_pointers: Vec<(usize, usize)>,
-    ladder_values: Vec<usize>,
-    auxiliary_info: Vec<NodeInfo>,
+pub struct LevelAncestorSupport {
+    pub jump_pointers: Vec<(usize, usize)>,
+    pub ladder_values: Vec<usize>,
+    pub auxiliary_info: Vec<NodeInfo>,
 }
 
 impl LevelAncestorSupport {
-    fn new(tree: &[Node]) -> Self {
+    pub fn new(tree: &[Node]) -> Self {
         let tree_size = tree.len();
 
         let mut jump_pointers  = Vec::<(usize, usize)>::with_capacity(2 * tree_size);
@@ -128,7 +128,7 @@ impl LevelAncestorSupport {
         }
     }
 
-    fn query(&self, tree: &[Node], node: usize, climb: usize) -> usize {
+    pub fn query(&self, tree: &[Node], node: usize, climb: usize) -> usize {
         match climb {
             0 => node,
             1 => tree[node].parent,

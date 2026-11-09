@@ -8,8 +8,11 @@ macro_rules! seqs {
 
 pub mod rmq;
 pub mod level;
+pub mod lce;
 
 use rmq::RangeMinimumQuery as RMQ;
+use level::LevelAncestorSupport as LAQ;
+use lce::LongestCommonExtension as LCE;
 
 use bitvec::prelude::*;
 use sbwt::BuildByLibsais;
@@ -18,7 +21,7 @@ use sbwt::SubsetSeq;
 use sbwt::SubsetMatrix;
 
 #[derive(Default, Debug)]
-struct Node {
+pub struct Node {
     id: usize,
     depth: usize,
     parent: usize,
@@ -28,14 +31,19 @@ struct Node {
 #[derive(Default, Debug)]
 struct MappingInformation {
     sbwt_to_tree: Vec<usize>,
-    kmer_length: Vec<usize>,
+    // (type:1) [0..=k]      - branch originally connected to the root
+    //                         or of a loop with length greater than k
+    // (type:2) [k+1..=2k-1] - node in an unrolled loop
+    // (type:3) [2k..]       - in the subtree of a node in an unrolled loop;
+    //                         points to the root of the subtree
+    branch_identifier: Vec<usize>,
 }
 
 impl MappingInformation {
     fn new(length: usize) -> Self {
         Self {
             sbwt_to_tree: vec![0; length],
-            kmer_length:  vec![0; length],
+            branch_identifier:  vec![0; length],
         }
     }
 }
@@ -44,7 +52,7 @@ struct TreeDecompositionRMQ {
     sbwt_1_mapping: MappingInformation,
     sbwt_2_mapping: MappingInformation,
     // The names in the tree should be the inverse permutation of the order vector. That is from
-    // the sbwt -> tree mapping we can get the range for the range minimum queries.
+    // the (sbwt -> tree) mapping we can get the range for the range minimum queries.
     tree: Vec<Node>,
     // order: Vec<usize>,
     rmq: RMQ,
@@ -124,17 +132,6 @@ where
     }
 }
 
-struct LongestCommonExtension;
-fn longest_common_extension<SS1, SS2>(sbwt_1: &SbwtIndex<SS1>, sbwt_2: &SbwtIndex<SS2>) -> LongestCommonExtension
-where
-    SS1: SubsetSeq,
-    SS2: SubsetSeq,
-{
-    let tree_decomposition_rmq = range_minimum_query(sbwt_1, sbwt_2);
-
-    LongestCommonExtension
-}
-
 fn inedge_name(sbwt_index: usize, c_array: &[usize]) -> usize {
     for character_index in (0..c_array.len()).rev() {
         if sbwt_index >= c_array[character_index] {
@@ -174,7 +171,7 @@ fn emit_tree_from_sbwt<SS: SubsetSeq>(
 
         mapped.set(sbwt_index, true);
         mapping.sbwt_to_tree[sbwt_index] = tree_index;
-        mapping.kmer_length [sbwt_index] = length;
+        mapping.branch_identifier [sbwt_index] = length;
 
         for (character_index, &character) in alphabet.iter().enumerate() {
             let option_range = sbwt.search_from(sbwt_index..sbwt_index + 1, &[character]);
@@ -186,7 +183,6 @@ fn emit_tree_from_sbwt<SS: SubsetSeq>(
     }
 }
 
-#[allow(clippy::ptr_arg)]
 fn emit_components_from_sbwt<SS: SubsetSeq>(
     sbwt: &SbwtIndex<SS>,
     stack: &mut Vec<(usize, usize, usize)>,
@@ -268,6 +264,7 @@ fn emit_components_from_sbwt<SS: SubsetSeq>(
         }
 
         // Second instance of the necklace:
+        let mut loop_branch_identifier = 0;
         for &(sbwt_index, _, _) in stack.iter() {
             mapped.set(sbwt_index, true);
             let tree_index = tree.len();
@@ -278,17 +275,23 @@ fn emit_components_from_sbwt<SS: SubsetSeq>(
                 name: inedge_name(sbwt_index, &c_array),
             });
             mapping.sbwt_to_tree[sbwt_index] = tree_index;
+            if loop_length < k {
+                loop_branch_identifier += 1;
+            }
+            mapping.branch_identifier[sbwt_index] = k + loop_branch_identifier;
             parent = tree_index;
         }
 
         // Explore the subtrees of the necklace:
         stack.clear();
         stack.push((current_sbwt_index, 0, 0));
-        while let Some((sbwt_index, tree_parent, name)) = stack.pop() {
+        while let Some((sbwt_index, tree_parent, mut branch_identifier)) = stack.pop() {
             let attachment_point = if mapped[sbwt_index] {
                 if loop_length >= k {
+                    branch_identifier = k;
                     mapping.sbwt_to_tree[sbwt_index]
                 } else {
+                    branch_identifier = 2 * k + mapping.sbwt_to_tree[sbwt_index];
                     0
                 }
             } else {
@@ -297,24 +300,23 @@ fn emit_components_from_sbwt<SS: SubsetSeq>(
                     id: sbwt_index + offset,
                     depth: 0,
                     parent: tree_parent,
-                    name,
+                    name: inedge_name(sbwt_index, &c_array),
                 });
                 mapped.set(sbwt_index, true);
                 mapping.sbwt_to_tree[sbwt_index] = index;
-                // TODO: mapping.kmer_length[sbwt_index] = k + todo!() as usize;
+                mapping.branch_identifier[sbwt_index] = branch_identifier;
                 index
             };
 
             for (character_index, &character) in alphabet.iter().enumerate() {
                 let option_range = sbwt.search_from(sbwt_index..sbwt_index + 1, &[character]);
                 if let Some(range) = option_range && range.start != current_sbwt_index {
-                    stack.push((range.start, attachment_point, character_index + 2)); 
+                    stack.push((range.start, attachment_point, branch_identifier)); 
                 }
             }
         }
     }
 }
-
 
 #[inline]
 fn climb(tree: &[Node], node: usize, offset: usize) -> usize {
@@ -539,7 +541,6 @@ fn sort_tree(
     // Step 2: sort residual indices.
     //
     // Radix sort using the new names from the sample tree.
-    // note(mk): (?) reuse one of the fields of Node to skip using the mapping a second time.
     let mut residual_buckets = sample_suffix_array; 
     residual_buckets.iter_mut().for_each(|value| *value = 0);
     residual_buckets.push(0);
@@ -812,6 +813,6 @@ fn main() {
         .build_select_support(true)
         .run();
 
-    let lce = longest_common_extension(&sbwt_1, &sbwt_2);
+    let lce = LCE::new(&sbwt_1, &sbwt_2);
 }
 
