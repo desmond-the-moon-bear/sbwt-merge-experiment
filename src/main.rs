@@ -16,6 +16,7 @@ use lce::LongestCommonExtension as LCE;
 
 use bitvec::prelude::*;
 use sbwt::BuildByLibsais;
+use sbwt::BitPackedKmerSortingMem;
 use sbwt::SbwtIndex;
 use sbwt::SubsetSeq;
 use sbwt::SubsetMatrix;
@@ -99,10 +100,10 @@ where
     let mut bucket_buffer = vec![];
     let rmq = sort_tree(&mut tree, &mut order, &mut alphabet_rmq, &mut bucket_buffer, 5, 1, sbwt_1.k());
 
-    for (index, node) in tree.iter().enumerate() {
-        println!("{:3} <- {:3} : {}", node.parent, index, node.depth);
-    }
-
+    // for (index, node) in tree.iter().enumerate() {
+    //     println!("{:3} <- {:3} : {}", node.parent, index, node.depth);
+    // }
+    //
     // let lcp_array = rmq.values();
     // let name_lengths_array = rmq.name_lengths();
     // let mut kmer_buffer = vec![0_u8; sbwt_1.k()];
@@ -800,7 +801,7 @@ fn main() {
         b"GCGCGCA",
         b"GCGCGCT",
     ];
-    let (mut sbwt_1, _) = BuildByLibsais::new_from_vecs(&seq_1, 7)
+    let (mut sbwt_1, _) = BitPackedKmerSortingMem::new_from_vecs(&seq_1, 7)
         .build_select_support(true)
         .run();
 
@@ -809,10 +810,39 @@ fn main() {
         b"CCGGGGG",
         b"CCTTTTT",
     ];
-    let (mut sbwt_2, _) = BuildByLibsais::new_from_vecs(&seq_2, 7)
+    let (mut sbwt_2, _) = BitPackedKmerSortingMem::new_from_vecs(&seq_2, 7)
         .build_select_support(true)
         .run();
 
+    let sbwts = &[&sbwt_1, &sbwt_2];
+
     let lce = LCE::new(&sbwt_1, &sbwt_2);
+    println!("{} {}", sbwt_1.n_sets(), sbwt_2.n_sets());
+    let offset = sbwt_1.n_sets();
+    let count = offset + sbwt_2.n_sets();
+    for i in 0..count {
+        let (index_1, origin_1) = if i < offset {
+            (i, 0)
+        } else {
+            (i - offset, 1)
+        };
+
+        for j in i + 1..count {
+            let (index_2, origin_2) = if j < offset {
+                (j, 0)
+            } else {
+                (j - offset, 1)
+            };
+
+            let (extension, ordering) = lce.query(index_1, origin_1, index_2, origin_2);
+            let kmer_1 = String::from_utf8(sbwts[origin_1].access_kmer(index_1)).unwrap();
+            let kmer_2 = String::from_utf8(sbwts[origin_2].access_kmer(index_2)).unwrap();
+
+            println!("{}", kmer_1);
+            println!("{} {:?} {:?}", kmer_2, extension, ordering);
+            println!();
+        }
+    }
+
 }
 

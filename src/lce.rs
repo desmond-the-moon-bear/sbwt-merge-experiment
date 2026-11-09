@@ -38,6 +38,9 @@ impl LongestCommonExtension {
         sbwt_index_2: usize,
         sbwt_origin_2: usize
     ) -> (usize, std::cmp::Ordering) {
+        if sbwt_index_1 == 0 && sbwt_index_2 == 0 {
+            return (self.k, std::cmp::Ordering::Equal);
+        }
         let mapping_1 = if sbwt_origin_1 == 0 { &self.rmq.sbwt_1_mapping } else { &self.rmq.sbwt_2_mapping };
         let mapping_2 = if sbwt_origin_2 == 0 { &self.rmq.sbwt_1_mapping } else { &self.rmq.sbwt_2_mapping };
         let node_1 = mapping_1.sbwt_to_tree[sbwt_index_1];
