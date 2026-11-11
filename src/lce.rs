@@ -80,7 +80,6 @@ impl LongestCommonExtension {
 
             let mut subtree_extension = 0;
             if branch_identifier_2 >= 2 * k {
-                // println!("starts as type:3");
                 // node_2 is type:3.
                 subtree_extension += self.rm_query(node_1, node_2);
                 if subtree_extension >= k {
@@ -214,7 +213,6 @@ impl LongestCommonExtension {
         mut node_2: usize,
         mut branch_identifier_2: usize
     ) -> (usize, std::cmp::Ordering) {
-        // println!("here 33");
         let k = self.k;
 
         debug_assert!(2 * k <= branch_identifier_1);
@@ -306,7 +304,6 @@ impl LongestCommonExtension {
         mut node_2: usize,
         mut branch_identifier_2: usize
     ) -> (usize, std::cmp::Ordering) {
-        // println!("here 23");
         let k = self.k;
 
         debug_assert!(k < branch_identifier_1 && branch_identifier_1 < 2 * k);
@@ -355,7 +352,7 @@ impl LongestCommonExtension {
         let shifted_ancestor = self.la_query(sample_ancestor, loop_1_length);
         let shift_extension = self.rm_query(sample_ancestor, shifted_ancestor);
 
-        let total_subtree_extension = shift_extension + depth_in_loop_1;
+        let total_subtree_extension = shift_extension + self.rmq.tree[node_1].depth;
         if total_subtree_extension < self.rmq.tree[node_2].depth {
             // non-loop node === shifted ancestor
             let ordering = self.compare_ancestors(sample_ancestor, shifted_ancestor, shift_extension);
@@ -383,7 +380,6 @@ impl LongestCommonExtension {
         mut node_2: usize,
         mut branch_identifier_2: usize
     ) -> (usize, std::cmp::Ordering) {
-        // println!("here 22");
         let k = self.k;
 
         debug_assert!(k < branch_identifier_1 && branch_identifier_1 < 2 * k);
@@ -426,7 +422,7 @@ impl LongestCommonExtension {
             ordering = ordering.reverse();
         }
 
-        (shift_extension + depth_in_loop_1, ordering)
+        (shift_extension + self.rmq.tree[node_1].depth, ordering)
     }
 
     #[inline]
@@ -504,17 +500,21 @@ impl LongestCommonExtension {
 mod test {
     use super::*;
 
-    fn test_lce_from_sbwts<SS>(sbwt_1: &SbwtIndex<SS>, sbwt_2: &SbwtIndex<SS>) 
-    where
-        SS: SubsetSeq,
+    fn test_lce_from_sbwts(k: usize, seq_1: Vec<Vec<u8>>, seq_2: Vec<Vec<u8>>) 
     {
-        let k = sbwt_1.k();
-        let sbwts = &[Box::new(sbwt_1), Box::new(sbwt_2)];
+        let (mut sbwt_1, _) = BitPackedKmerSortingMem::new_from_vecs(&seq_1, k)
+            .build_select_support(true)
+            .run();
+        let (mut sbwt_2, _) = BitPackedKmerSortingMem::new_from_vecs(&seq_2, k)
+            .build_select_support(true)
+            .run();
 
-        let lce = LCE::new(sbwt_1, sbwt_2);
+        let sbwts = &[&sbwt_1, &sbwt_2];
+
+        let lce = LCE::new(&sbwt_1, &sbwt_2);
         let offset = sbwt_1.n_sets();
         let count = offset + sbwt_2.n_sets();
-        for i in 1..count {
+        for i in 0..count {
             let (index_1, origin_1) = if i < offset {
                 (i, 0)
             } else {
@@ -523,7 +523,10 @@ mod test {
 
             let kmer_1 = sbwts[origin_1].access_kmer(index_1);
             let kmer_1_str = str::from_utf8(&kmer_1).unwrap();
-            for j in i + 1..count {
+            for j in 0..count {
+                if j == i {
+                    continue;
+                }
                 let (index_2, origin_2) = if j < offset {
                     (j, 0)
                 } else {
@@ -566,10 +569,6 @@ mod test {
             b"GCGCGCA",
             b"GCGCGCT",
         ];
-        let (mut sbwt_1, _) = BitPackedKmerSortingMem::new_from_vecs(&seq_1, k)
-            .build_select_support(true)
-            .run();
-
         let seq_2 = seqs![
             b"AACCCCC",
             b"CCGGGGG",
@@ -578,11 +577,7 @@ mod test {
             b"ACACCAGGGAGGGG",
             b"ACAGGAGGGAGGGG",
         ];
-        let (mut sbwt_2, _) = BitPackedKmerSortingMem::new_from_vecs(&seq_2, k)
-            .build_select_support(true)
-            .run();
-
-        test_lce_from_sbwts(&sbwt_1, &sbwt_2);
+        test_lce_from_sbwts(k, seq_1, seq_2);
     }
 
     #[test]
@@ -592,38 +587,70 @@ mod test {
             b"ATATATATA",
             b"ATATACGCG",
         ];
-        let (mut sbwt_1, _) = BitPackedKmerSortingMem::new_from_vecs(&seq_1, k)
-            .build_select_support(true)
-            .run();
-
         let seq_2 = seqs![
             b"CGCGCGCGCG",
             b"CGCGCATAT",
         ];
-        let (mut sbwt_2, _) = BitPackedKmerSortingMem::new_from_vecs(&seq_2, k)
-            .build_select_support(true)
-            .run();
-
-        test_lce_from_sbwts(&sbwt_1, &sbwt_2);
+        test_lce_from_sbwts(k, seq_1, seq_2);
     }
 
     #[test]
     fn lce_3() {
         let k = 7;
         let seq_1 = seqs![
-            b"ATATATATACGCG",
+            b"ATATATATATCGCGCG",
         ];
-        let (mut sbwt_1, _) = BitPackedKmerSortingMem::new_from_vecs(&seq_1, k)
-            .build_select_support(true)
-            .run();
-
         let seq_2 = seqs![
-            b"CGCGCGCGCGATAT",
+            b"CGCGCGCGCGATATAT",
         ];
-        let (mut sbwt_2, _) = BitPackedKmerSortingMem::new_from_vecs(&seq_2, k)
-            .build_select_support(true)
-            .run();
+        test_lce_from_sbwts(k, seq_1, seq_2);
+    }
 
-        test_lce_from_sbwts(&sbwt_1, &sbwt_2);
+    #[test]
+    fn lce_4() {
+        let k = 7;
+        let seq_1 = seqs![
+            b"GATATATGATATAT",
+        ];
+        let seq_2 = seqs![
+            b"ATATATAT",
+        ];
+        test_lce_from_sbwts(k, seq_1, seq_2);
+    }
+
+    #[test]
+    fn lce_5() {
+        let k = 7;
+        let seq_1 = seqs![
+            b"CATCATCATCATCAT",
+        ];
+        let seq_2 = seqs![
+            b"CTACTACTACTACTA",
+        ];
+        test_lce_from_sbwts(k, seq_1, seq_2);
+    }
+
+    #[test]
+    fn lce_6() {
+        let k = 7;
+        let seq_1 = seqs![
+            b"CATCATCATCATCAT",
+        ];
+        let seq_2 = seqs![
+            b"CATCATCATCATCAT",
+        ];
+        test_lce_from_sbwts(k, seq_1, seq_2);
+    }
+
+    #[test]
+    fn lce_7() {
+        let k = 7;
+        let seq_1 = seqs![
+            b"CATGTACTTTATTCCATGTACTTTATTCC",
+        ];
+        let seq_2 = seqs![
+            b"CACACACACA",
+        ];
+        test_lce_from_sbwts(k, seq_1, seq_2);
     }
 }
