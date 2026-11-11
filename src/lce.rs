@@ -8,10 +8,10 @@ use super::*;
 //                         points to the root of the subtree
 
 pub struct LongestCommonExtension {
-    k: usize,
-    offset: usize,
-    rmq: TreeDecompositionRMQ,
-    laq: LAQ,
+    pub k: usize,
+    pub offset: usize,
+    pub rmq: TreeDecompositionRMQ,
+    pub laq: LAQ,
 }
 
 impl LongestCommonExtension {
@@ -80,9 +80,9 @@ impl LongestCommonExtension {
 
             let mut subtree_extension = 0;
             if branch_identifier_2 >= 2 * k {
+                // println!("starts as type:3");
                 // node_2 is type:3.
-                let (rmq_start, rmq_end) = self.find_rmq_arguments(node_1, node_2);
-                subtree_extension += self.rmq.rmq.query(rmq_start, rmq_end);
+                subtree_extension += self.rm_query(node_1, node_2);
                 if subtree_extension >= k {
                     return (k, std::cmp::Ordering::Equal);
                 }
@@ -111,10 +111,9 @@ impl LongestCommonExtension {
             }
 
             // node_2 is type:2.
-            debug_assert!(k < branch_identifier_2 && branch_identifier_2 < 2 * k);
             debug_assert!(branch_identifier_1 <= k);
-            let (rmq_start, rmq_end) = self.find_rmq_arguments(node_1, node_2);
-            let first_loop_extension = self.rmq.rmq.query(rmq_start, rmq_end);
+            debug_assert!(k < branch_identifier_2 && branch_identifier_2 < 2 * k);
+            let first_loop_extension = self.rm_query(node_1, node_2);
             if first_loop_extension + subtree_extension >= k {
                 return (k, std::cmp::Ordering::Equal);
             }
@@ -165,7 +164,7 @@ impl LongestCommonExtension {
                 sample_branch_identifier,
             );
 
-            let total_extension = extension + depth_in_loop_2 + subtree_extension;
+            let total_extension = extension + self.rmq.tree[node_2].depth + subtree_extension;
             if total_extension >= k {
                 return (k, std::cmp::Ordering::Equal);
             }
@@ -191,8 +190,7 @@ impl LongestCommonExtension {
         mut branch_identifier_2: usize
     ) -> (usize, std::cmp::Ordering) {
         let k = self.k;
-        let (rmq_start, rmq_end) = self.find_rmq_arguments(node_1, node_2);
-        let extension = self.rmq.rmq.query(rmq_start, rmq_end);
+        let extension = self.rm_query(node_1, node_2);
         if extension >= k {
             return (k, std::cmp::Ordering::Equal);
         }
@@ -216,13 +214,13 @@ impl LongestCommonExtension {
         mut node_2: usize,
         mut branch_identifier_2: usize
     ) -> (usize, std::cmp::Ordering) {
+        // println!("here 33");
         let k = self.k;
 
         debug_assert!(2 * k <= branch_identifier_1);
         debug_assert!(2 * k <= branch_identifier_2);
 
-        let (rmq_start, rmq_end) = self.find_rmq_arguments(node_1, node_2);
-        let subtree_extension = self.rmq.rmq.query(rmq_start, rmq_end);
+        let subtree_extension = self.rm_query(node_1, node_2);
 
         if subtree_extension < self.rmq.tree[node_1].depth && subtree_extension < self.rmq.tree[node_2].depth {
             let ordering = self.compare_ancestors(node_1, node_2, subtree_extension);
@@ -308,13 +306,13 @@ impl LongestCommonExtension {
         mut node_2: usize,
         mut branch_identifier_2: usize
     ) -> (usize, std::cmp::Ordering) {
+        // println!("here 23");
         let k = self.k;
 
         debug_assert!(k < branch_identifier_1 && branch_identifier_1 < 2 * k);
         debug_assert!(2 * k <= branch_identifier_2);
 
-        let (rmq_start, rmq_end) = self.find_rmq_arguments(node_1, node_2);
-        let mut subtree_extension = self.rmq.rmq.query(rmq_start, rmq_end);
+        let mut subtree_extension = self.rm_query(node_1, node_2);
 
         if subtree_extension < self.rmq.tree[node_1].depth && subtree_extension < self.rmq.tree[node_2].depth {
             let ordering = self.compare_ancestors(node_1, node_2, subtree_extension);
@@ -355,8 +353,7 @@ impl LongestCommonExtension {
 
         let sample_ancestor  = self.la_query(         node_2, depth_in_loop_1);
         let shifted_ancestor = self.la_query(sample_ancestor, loop_1_length);
-        let (rmq_start, rmq_end) = self.find_rmq_arguments(sample_ancestor, shifted_ancestor);
-        let shift_extension = self.rmq.rmq.query(rmq_start, rmq_end);
+        let shift_extension = self.rm_query(sample_ancestor, shifted_ancestor);
 
         let total_subtree_extension = shift_extension + depth_in_loop_1;
         if total_subtree_extension < self.rmq.tree[node_2].depth {
@@ -386,6 +383,7 @@ impl LongestCommonExtension {
         mut node_2: usize,
         mut branch_identifier_2: usize
     ) -> (usize, std::cmp::Ordering) {
+        // println!("here 22");
         let k = self.k;
 
         debug_assert!(k < branch_identifier_1 && branch_identifier_1 < 2 * k);
@@ -396,8 +394,7 @@ impl LongestCommonExtension {
         let mut loop_2_length   = self.rmq.tree[node_2].depth + k - branch_identifier_2;
         let mut depth_in_loop_2 = self.rmq.tree[node_2].depth - loop_2_length;
 
-        let (rmq_start, rmq_end) = self.find_rmq_arguments(node_1, node_2);
-        let initial_extension = self.rmq.rmq.query(rmq_start, rmq_end);
+        let initial_extension = self.rm_query(node_1, node_2);
 
         if initial_extension < self.rmq.tree[node_1].depth && initial_extension < self.rmq.tree[node_2].depth {
             let ordering = self.compare_ancestors(node_1, node_2, initial_extension);
@@ -421,8 +418,7 @@ impl LongestCommonExtension {
 
         let sample_ancestor  = self.find_canonic_node(self.la_query(         node_2, depth_in_loop_1));
         let shifted_ancestor = self.find_canonic_node(self.la_query(sample_ancestor, loop_1_length));
-        let (rmq_start, rmq_end) = self.find_rmq_arguments(sample_ancestor, shifted_ancestor);
-        let shift_extension = self.rmq.rmq.query(rmq_start, rmq_end);
+        let shift_extension = self.rm_query(sample_ancestor, shifted_ancestor);
         
         // longer loop === shifted_ancestor
         let mut ordering = self.compare_ancestors(sample_ancestor, shifted_ancestor, shift_extension);
@@ -439,13 +435,15 @@ impl LongestCommonExtension {
     }
 
     #[inline]
-    fn find_rmq_arguments(&self, node_1: usize, node_2: usize) -> (usize, usize) {
+    fn rm_query(&self, node_1: usize, node_2: usize) -> usize {
         let name_1 = self.rmq.tree[node_1].name;
         let name_2 = self.rmq.tree[node_2].name;
+        if name_1 == name_2 {
+            return self.rmq.rmq.name_lengths()[name_1]
+        }
         let smaller_name = name_1.min(name_2);
-        let rmq_start = smaller_name + 1;
-        let rmq_end = name_1 + name_2 - smaller_name;
-        (rmq_start, rmq_end)
+        let bigger_name = name_1 + name_2 - smaller_name;
+        self.rmq.rmq.query(smaller_name + 1, bigger_name)
     }
 
     #[inline]
@@ -502,3 +500,130 @@ impl LongestCommonExtension {
     }
 }
 
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    fn test_lce_from_sbwts<SS>(sbwt_1: &SbwtIndex<SS>, sbwt_2: &SbwtIndex<SS>) 
+    where
+        SS: SubsetSeq,
+    {
+        let k = sbwt_1.k();
+        let sbwts = &[Box::new(sbwt_1), Box::new(sbwt_2)];
+
+        let lce = LCE::new(sbwt_1, sbwt_2);
+        let offset = sbwt_1.n_sets();
+        let count = offset + sbwt_2.n_sets();
+        for i in 1..count {
+            let (index_1, origin_1) = if i < offset {
+                (i, 0)
+            } else {
+                (i - offset, 1)
+            };
+
+            let kmer_1 = sbwts[origin_1].access_kmer(index_1);
+            let kmer_1_str = str::from_utf8(&kmer_1).unwrap();
+            for j in i + 1..count {
+                let (index_2, origin_2) = if j < offset {
+                    (j, 0)
+                } else {
+                    (j - offset, 1)
+                };
+
+                let kmer_2 = sbwts[origin_2].access_kmer(index_2);
+                let kmer_2_str = str::from_utf8(&kmer_2).unwrap();
+
+                let (extension, ordering) = lce.query(index_1, origin_1, index_2, origin_2);
+                let mut true_extension = 0;
+                for j in (0..k).rev() {
+                    if kmer_1[j] != kmer_2[j] {
+                        break;
+                    }
+                    true_extension += 1;
+                }
+                if ordering == std::cmp::Ordering::Equal {
+                    assert!(kmer_1 == kmer_2, "{} {} {:?} {:?}", kmer_1_str, kmer_2_str, extension, ordering);
+                } else {
+                    assert!(
+                        true_extension == extension &&
+                        kmer_1[k-extension..k] == kmer_2[k-extension..k] &&
+                        kmer_1[k-extension-1].cmp(&kmer_2[k-extension-1]) == ordering,
+                        "{} {} {:?} {:?}", kmer_1_str, kmer_2_str, extension, ordering
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn lce_1() {
+        let k = 7;
+        let seq_1 = seqs![
+            b"AACCCCC",
+            b"AAGGGGG",
+            b"TTCCCCG",
+            b"GCGCGCGCG",
+            b"GCGCGCA",
+            b"GCGCGCT",
+        ];
+        let (mut sbwt_1, _) = BitPackedKmerSortingMem::new_from_vecs(&seq_1, k)
+            .build_select_support(true)
+            .run();
+
+        let seq_2 = seqs![
+            b"AACCCCC",
+            b"CCGGGGG",
+            b"CCTTTTT",
+            b"ACACCACCCACCCC",
+            b"ACACCAGGGAGGGG",
+            b"ACAGGAGGGAGGGG",
+        ];
+        let (mut sbwt_2, _) = BitPackedKmerSortingMem::new_from_vecs(&seq_2, k)
+            .build_select_support(true)
+            .run();
+
+        test_lce_from_sbwts(&sbwt_1, &sbwt_2);
+    }
+
+    #[test]
+    fn lce_2() {
+        let k = 7;
+        let seq_1 = seqs![
+            b"ATATATATA",
+            b"ATATACGCG",
+        ];
+        let (mut sbwt_1, _) = BitPackedKmerSortingMem::new_from_vecs(&seq_1, k)
+            .build_select_support(true)
+            .run();
+
+        let seq_2 = seqs![
+            b"CGCGCGCGCG",
+            b"CGCGCATAT",
+        ];
+        let (mut sbwt_2, _) = BitPackedKmerSortingMem::new_from_vecs(&seq_2, k)
+            .build_select_support(true)
+            .run();
+
+        test_lce_from_sbwts(&sbwt_1, &sbwt_2);
+    }
+
+    #[test]
+    fn lce_3() {
+        let k = 7;
+        let seq_1 = seqs![
+            b"ATATATATACGCG",
+        ];
+        let (mut sbwt_1, _) = BitPackedKmerSortingMem::new_from_vecs(&seq_1, k)
+            .build_select_support(true)
+            .run();
+
+        let seq_2 = seqs![
+            b"CGCGCGCGCGATAT",
+        ];
+        let (mut sbwt_2, _) = BitPackedKmerSortingMem::new_from_vecs(&seq_2, k)
+            .build_select_support(true)
+            .run();
+
+        test_lce_from_sbwts(&sbwt_1, &sbwt_2);
+    }
+}

@@ -49,7 +49,7 @@ impl MappingInformation {
     }
 }
 
-struct TreeDecompositionRMQ {
+pub struct TreeDecompositionRMQ {
     sbwt_1_mapping: MappingInformation,
     sbwt_2_mapping: MappingInformation,
     // The names in the tree should be the inverse permutation of the order vector. That is from
@@ -69,8 +69,8 @@ where
     // Merge the root of the two SBWT indices.
     let sbwt_1_size = sbwt_1.n_sets();
     let sbwt_2_size = sbwt_2.n_sets();
-    let tree_size = sbwt_1_size + sbwt_2_size - 1;
-    let mut tree = Vec::<Node>::with_capacity(tree_size);
+    let initial_tree_capacity = sbwt_1_size + sbwt_2_size - 1;
+    let mut tree = Vec::<Node>::with_capacity(2 * initial_tree_capacity);
     tree.push(Node::default());
     tree[0].name = 1;
 
@@ -85,13 +85,12 @@ where
     emit_tree_from_sbwt      (sbwt_2, &mut stack, &mut tree, &mut sbwt_2_mapping, &mut sbwt_2_mapped, sbwt_1_size);
     emit_components_from_sbwt(sbwt_2, &mut stack, &mut tree, &mut sbwt_2_mapping, &mut sbwt_2_mapped, sbwt_1_size);
 
-    // let mut byte_names = Vec::<u8>::with_capacity(tree.len());
-    // byte_names.extend(tree.iter().map(|node| node.name as u8));
+    let tree_size = tree.len();
 
-    let mut order = vec![0_usize; tree.len()];
+    let mut order = vec![0_usize; tree_size];
 
-    let mut alphabet_lcp          = Vec::with_capacity(tree.len());
-    let mut alphabet_name_lengths = Vec::with_capacity(tree.len());
+    let mut alphabet_lcp          = Vec::with_capacity(tree_size);
+    let mut alphabet_name_lengths = Vec::with_capacity(tree_size);
     alphabet_lcp         .extend_from_slice(&[0; 5]);
     alphabet_name_lengths.push(0);
     alphabet_name_lengths.extend_from_slice(&[1; 4]);
@@ -123,6 +122,10 @@ where
     //         println!("[2:{:05}] [{:3}] {} [{:3}]", node_index, name_length, kmer, lcp);
     //     }
     // }
+
+    for i in 0..tree_size {
+        tree[order[i]].name = i;
+    }
 
     TreeDecompositionRMQ {
         sbwt_1_mapping,
@@ -793,6 +796,7 @@ fn calculate_lcp_and_name_length(
 }
 
 fn main() {
+    let k = 7;
     let seq_1 = seqs![
         b"AACCCCC",
         b"AAGGGGG",
@@ -801,7 +805,7 @@ fn main() {
         b"GCGCGCA",
         b"GCGCGCT",
     ];
-    let (mut sbwt_1, _) = BitPackedKmerSortingMem::new_from_vecs(&seq_1, 7)
+    let (mut sbwt_1, _) = BitPackedKmerSortingMem::new_from_vecs(&seq_1, k)
         .build_select_support(true)
         .run();
 
@@ -810,23 +814,25 @@ fn main() {
         b"CCGGGGG",
         b"CCTTTTT",
     ];
-    let (mut sbwt_2, _) = BitPackedKmerSortingMem::new_from_vecs(&seq_2, 7)
+    let (mut sbwt_2, _) = BitPackedKmerSortingMem::new_from_vecs(&seq_2, k)
         .build_select_support(true)
         .run();
 
     let sbwts = &[&sbwt_1, &sbwt_2];
 
     let lce = LCE::new(&sbwt_1, &sbwt_2);
-    println!("{} {}", sbwt_1.n_sets(), sbwt_2.n_sets());
+
     let offset = sbwt_1.n_sets();
     let count = offset + sbwt_2.n_sets();
-    for i in 0..count {
+    for i in 1..count {
         let (index_1, origin_1) = if i < offset {
             (i, 0)
         } else {
             (i - offset, 1)
         };
 
+        let kmer_1 = sbwts[origin_1].access_kmer(index_1);
+        let kmer_1_str = str::from_utf8(&kmer_1).unwrap();
         for j in i + 1..count {
             let (index_2, origin_2) = if j < offset {
                 (j, 0)
@@ -834,15 +840,16 @@ fn main() {
                 (j - offset, 1)
             };
 
-            let (extension, ordering) = lce.query(index_1, origin_1, index_2, origin_2);
-            let kmer_1 = String::from_utf8(sbwts[origin_1].access_kmer(index_1)).unwrap();
-            let kmer_2 = String::from_utf8(sbwts[origin_2].access_kmer(index_2)).unwrap();
+            let kmer_2 = sbwts[origin_2].access_kmer(index_2);
+            let kmer_2_str = str::from_utf8(&kmer_2).unwrap();
 
-            println!("{}", kmer_1);
-            println!("{} {:?} {:?}", kmer_2, extension, ordering);
-            println!();
+            let (extension, ordering) = lce.query(index_1, origin_1, index_2, origin_2);
+            println!("{} {} {}; lce: {}", kmer_1_str, match ordering {
+                std::cmp::Ordering::Less =>    "is before  ",
+                std::cmp::Ordering::Equal =>   "is equal to",
+                std::cmp::Ordering::Greater => "is after   ",
+            }, kmer_2_str, extension);
         }
     }
-
 }
 
