@@ -188,6 +188,7 @@ impl LongestCommonExtension {
         mut node_2: usize,
         mut branch_identifier_2: usize
     ) -> (usize, std::cmp::Ordering) {
+        println!("11");
         let k = self.k;
         let extension = self.rm_query(node_1, node_2);
         if extension >= k {
@@ -213,6 +214,7 @@ impl LongestCommonExtension {
         mut node_2: usize,
         mut branch_identifier_2: usize
     ) -> (usize, std::cmp::Ordering) {
+        println!("33");
         let k = self.k;
 
         debug_assert!(2 * k <= branch_identifier_1);
@@ -304,6 +306,7 @@ impl LongestCommonExtension {
         mut node_2: usize,
         mut branch_identifier_2: usize
     ) -> (usize, std::cmp::Ordering) {
+        println!("23");
         let k = self.k;
 
         debug_assert!(k < branch_identifier_1 && branch_identifier_1 < 2 * k);
@@ -380,6 +383,7 @@ impl LongestCommonExtension {
         mut node_2: usize,
         mut branch_identifier_2: usize
     ) -> (usize, std::cmp::Ordering) {
+        println!("22");
         let k = self.k;
 
         debug_assert!(k < branch_identifier_1 && branch_identifier_1 < 2 * k);
@@ -646,10 +650,12 @@ mod test {
     fn lce_7() {
         let k = 7;
         let seq_1 = seqs![
-            b"CATGTACTTTATTCCATGTACTTTATTCC",
+            b"GACACGACACGACACGACAC",
+            b"GTGTGTGTGTGTGT"
         ];
         let seq_2 = seqs![
-            b"CACACACACA",
+            b"ACACACACACACAC",
+            b"CGTGTCGTGTCGTGTCGTGT"
         ];
         test_lce_from_sbwts(k, seq_1, seq_2);
     }
