@@ -110,7 +110,8 @@ impl LevelAncestorSupport {
                 let node_info = &mut auxiliary_info[deepest_leaf];
                 node_info.ladder_start = ladder_values.len();
                 let deepest_leaf_depth = tree[deepest_leaf].depth;
-                let ladder_length = ((deepest_leaf_depth - node.depth) * 2).min(deepest_leaf_depth); 
+                // let ladder_length = ((deepest_leaf_depth - node.depth) * 2).min(deepest_leaf_depth); 
+                let ladder_length = ((deepest_leaf_depth - node.depth) * 3).min(deepest_leaf_depth); 
                 node_info.ladder_length = ladder_length;
 
                 let mut ladder_rung = tree[deepest_leaf].parent;
@@ -178,27 +179,31 @@ mod test {
 
     #[test]
     fn level_ancestor_test() {
+        let k = 7;
         let seq_1 = seqs![
-            b"AACCCCC",
-            b"AAGGGGG",
-            b"TTCCCCG",
-            b"GCGCGCGCG",
-            b"GCGCGCA",
-            b"GCGCGCT",
+            b"AAAAAAC",
+            b"AAAAAAT",
+            // b"AACCCCC",
+            // b"AAGGGGG",
+            // b"TTCCCCG",
+            // b"GCGCGCGCG",
+            // b"GCGCGCA",
+            // b"GCGCGCT",
         ];
-        let (mut sbwt_1, _) = BuildByLibsais::new_from_vecs(&seq_1, 7)
+        let (mut sbwt_1, _) = BitPackedKmerSortingMem::new_from_vecs(&seq_1, k)
             .build_select_support(true)
             .run();
 
         let seq_2 = seqs![
-            b"AACCCCC",
-            b"CCGGGGG",
-            b"CCTTTTT",
-            b"ACACCACCCACCCC",
-            b"ACACCAGGGAGGGG",
-            b"ACAGGAGGGAGGGG",
+            b"AAAAAAG",
+            // b"AACCCCC",
+            // b"CCGGGGG",
+            // b"CCTTTTT",
+            // b"ACACCACCCACCCC",
+            // b"ACACCAGGGAGGGG",
+            // b"ACAGGAGGGAGGGG",
         ];
-        let (mut sbwt_2, _) = BuildByLibsais::new_from_vecs(&seq_2, 7)
+        let (mut sbwt_2, _) = BitPackedKmerSortingMem::new_from_vecs(&seq_2, k)
             .build_select_support(true)
             .run();
 

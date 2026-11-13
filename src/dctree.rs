@@ -67,6 +67,7 @@ where
     let mut sbwt_2_mapped = bitvec![0; sbwt_2_size];
 
     let mut stack = Vec::<(usize, usize, usize)>::new();
+    log::info!("emitting nodes:");
     emit_tree_from_sbwt      (sbwt_1, &mut stack, &mut tree, &mut sbwt_1_mapping, &mut sbwt_1_mapped, 0);
     emit_components_from_sbwt(sbwt_1, &mut stack, &mut tree, &mut sbwt_1_mapping, &mut sbwt_1_mapped, 0);
     emit_tree_from_sbwt      (sbwt_2, &mut stack, &mut tree, &mut sbwt_2_mapping, &mut sbwt_2_mapped, sbwt_1_size);
@@ -83,6 +84,7 @@ where
     alphabet_name_lengths.extend_from_slice(&[1; 4]);
     let mut alphabet_rmq = RMQ::new(alphabet_name_lengths, alphabet_lcp);
 
+    log::info!("sorting the tree:");
     let mut bucket_buffer = vec![];
     let rmq = sort_tree(&mut tree, &mut order, &mut alphabet_rmq, &mut bucket_buffer, 5, 1, sbwt_1.k());
 
@@ -143,9 +145,13 @@ fn emit_tree_from_sbwt<SS: SubsetSeq>(
     let alphabet = sbwt.alphabet();
     let k = sbwt.k();
 
+    println!("{}", sbwt.n_kmers());
     stack.clear();
     stack.push((0, 0, 1));
     while let Some((sbwt_index, tree_parent, length)) = stack.pop() {
+        if sbwt_index >= sbwt.n_sets() {
+            panic!("wut ?");
+        }
         let tree_index = if sbwt_index != 0 {
             let index = tree.len();
             tree.push(Node {
@@ -166,6 +172,7 @@ fn emit_tree_from_sbwt<SS: SubsetSeq>(
         for (character_index, &character) in alphabet.iter().enumerate() {
             let option_range = sbwt.search_from(sbwt_index..sbwt_index + 1, &[character]);
             if let Some(range) = option_range {
+                println!("{:?}", range);
                 // $ is 1; A is 2; C is 3 and so on...
                 stack.push((range.start, tree_index, (length + 1).min(k))); 
             }

@@ -21,12 +21,11 @@ pub struct LongestCommonExtension {
 }
 
 impl LongestCommonExtension {
-    pub fn new<SS1, SS2>(sbwt_1: &SbwtIndex<SS1>, sbwt_2: &SbwtIndex<SS2>) -> LongestCommonExtension
-    where
-        SS1: SubsetSeq,
-        SS2: SubsetSeq,
+    pub fn new<SS1: SubsetSeq, SS2: SubsetSeq>(sbwt_1: &SbwtIndex<SS1>, sbwt_2: &SbwtIndex<SS2>) -> LongestCommonExtension
     {
+        log::info!("tree decomposition:");
         let rmq = dctree::tree_decomposition_rmq(sbwt_1, sbwt_2);
+        log::info!("level ancestor queries:");
         let laq = LAQ::new(&rmq.tree);
 
         LongestCommonExtension {
@@ -70,11 +69,11 @@ impl LongestCommonExtension {
             return self.query_type_11(node_1, branch_identifier_1, node_2, branch_identifier_2);
         }
 
-        let mut reverse = false;
         // query_type_13 + query_type_12
         if branch_identifier_1 <= k || branch_identifier_2 <= k {
             // At least one node is type:1.
 
+            let mut reverse = false;
             if branch_identifier_2 <= k {
                 // Swap the nodes such that node_1 is type:1.
                 reverse = true;
@@ -194,7 +193,7 @@ impl LongestCommonExtension {
         mut node_2: usize,
         mut branch_identifier_2: usize
     ) -> (usize, std::cmp::Ordering) {
-        println!("11");
+        // println!("11");
         let k = self.k;
         let extension = self.rm_query(node_1, node_2);
         if extension >= k {
@@ -220,7 +219,7 @@ impl LongestCommonExtension {
         mut node_2: usize,
         mut branch_identifier_2: usize
     ) -> (usize, std::cmp::Ordering) {
-        println!("33");
+        // println!("33");
         let k = self.k;
 
         debug_assert!(2 * k <= branch_identifier_1);
@@ -312,7 +311,7 @@ impl LongestCommonExtension {
         mut node_2: usize,
         mut branch_identifier_2: usize
     ) -> (usize, std::cmp::Ordering) {
-        println!("23");
+        // println!("23");
         let k = self.k;
 
         debug_assert!(k < branch_identifier_1 && branch_identifier_1 < 2 * k);
@@ -389,7 +388,7 @@ impl LongestCommonExtension {
         mut node_2: usize,
         mut branch_identifier_2: usize
     ) -> (usize, std::cmp::Ordering) {
-        println!("22");
+        // println!("22");
         let k = self.k;
 
         debug_assert!(k < branch_identifier_1 && branch_identifier_1 < 2 * k);
@@ -504,6 +503,161 @@ impl LongestCommonExtension {
             )
         }
     }
+
+    pub fn is_dummy(
+        &self,
+        index: usize,
+        origin: usize,
+    ) -> bool {
+        let mapping = if origin == 0 { &self.rmq.sbwt_1_mapping } else { &self.rmq.sbwt_2_mapping };
+        let branch_identifier = mapping.branch_identifier[index];
+        branch_identifier < self.k
+    }
+}
+
+pub fn test_lce_from_sbwts<SS: SubsetSeq>(sbwt_1: &SbwtIndex<SS>, sbwt_2: &SbwtIndex<SS>) {
+    let k = sbwt_1.k();
+    let sbwts = &[sbwt_1, sbwt_2];
+
+    let lce = LongestCommonExtension::new(sbwt_1, sbwt_2);
+
+    // log::info!("testing laq:");
+    // fn level_ancestor_query(tree: &[Node], mut node: usize, mut climb: usize) -> usize {
+    //     while climb > 0 {
+    //         node = tree[node].parent;
+    //         climb -= 1;
+    //     }
+    //     node
+    // }
+    // let node_index = 824427;
+    // let climb: usize = 3;
+    // let most_significant_bit = usize::BITS - 1 - (climb / 3).leading_zeros();
+    // let target_power_of_2 = 1_i64 << most_significant_bit;
+    // let euler_index_of_node = lce.laq.auxiliary_info[node_index].euler_index;
+    // let euler_index = (euler_index_of_node & (-target_power_of_2)) | target_power_of_2;
+    //
+    // let largest_power_dividing = euler_index_of_node.isolate_lowest_one();
+    // println!("    euler index of node {}", euler_index_of_node);
+    // println!("lpd euler index of node {}", largest_power_dividing);
+    // let largest_power_dividing = euler_index.isolate_lowest_one();
+    // println!("    euler index found   {}", euler_index);
+    // println!("lpd euler index found   {}", largest_power_dividing);
+    //
+    // // Euler index is 1 based.
+    // let (jump_1, jump_2) = lce.laq.jump_pointers[euler_index as usize - 1];
+    // println!("{} {}", jump_1, jump_2);
+    // let leaf = if lce.rmq.tree[node_index].depth - lce.rmq.tree[jump_2].depth <= climb {
+    //     println!("bigger jump");
+    //     lce.laq.auxiliary_info[jump_2].deepest_leaf
+    // } else {
+    //     println!("smaller jump");
+    //     lce.laq.auxiliary_info[jump_1].deepest_leaf
+    // };
+    // let ladder_start = lce.laq.auxiliary_info[leaf].ladder_start;
+    // let rungs = climb + lce.rmq.tree[leaf].depth - lce.rmq.tree[node_index].depth;
+    // debug_assert!(rungs <= lce.laq.auxiliary_info[leaf].ladder_length);
+    //
+    // let mut p = node_index;
+    // for i in 0..10 {
+    //     print!("{} <- ", p);
+    //     p = lce.rmq.tree[p].parent;
+    // }
+    // println!();
+
+    // println!("{:?}", &lce.laq.ladder_values[ladder_start..ladder_start + lce.laq.auxiliary_info[leaf].ladder_length]);
+    // println!("{}{:?}", leaf, &lce.laq.ladder_values[ladder_start..ladder_start + rungs]);
+    // let my_leaf               = lce.laq.auxiliary_info[node_index].deepest_leaf;
+    // let my_leaf_depth         = lce.rmq.tree[my_leaf].depth;
+    // let my_leaf_ladder_start  = lce.laq.auxiliary_info[my_leaf].ladder_start;
+    // let my_leaf_ladder_length = lce.laq.auxiliary_info[my_leaf].ladder_length;
+    // println!("{}{:?}", my_leaf, &lce.laq.ladder_values[my_leaf_ladder_start..my_leaf_ladder_start + my_leaf_ladder_length]);
+
+    // for (node_index, node) in lce.rmq.tree.iter().enumerate() {
+        // let max_depth = node.depth;
+        // let max_depth = lce.rmq.tree[node_index].depth;
+        // for climb in 0..max_depth {
+        //     let invariant = level_ancestor_query(&lce.rmq.tree, node_index, climb);
+        //     let found     = lce.laq.query       (&lce.rmq.tree, node_index, climb);
+        //     assert_eq!(invariant, found, "node_index: {}; climb: {}", node_index, climb);
+        // }
+    // }
+
+    log::info!("testing lce:");
+    let offset = sbwt_1.n_sets();
+    let index_and_origin = |index| if index < offset {
+        (index, 0)
+    } else {
+        (index - offset, 1)
+    };
+
+    let count = offset + sbwt_2.n_sets();
+    let mut kmer_1_buf = Vec::<u8>::new();
+    let mut kmer_2_buf = Vec::<u8>::new();
+    let mut kmer_1_parent_buf = Vec::<u8>::new();
+    let mut kmer_2_parent_buf = Vec::<u8>::new();
+    for i in 0..count {
+        let (index_1, origin_1) = index_and_origin(i);
+
+        kmer_1_buf.clear();
+        sbwts[origin_1].push_kmer_to_vec(index_1, &mut kmer_1_buf);
+        let kmer_1_str = str::from_utf8(&kmer_1_buf).unwrap();
+        for j in 0..count {
+            if j == i {
+                continue;
+            }
+            let (index_2, origin_2) = index_and_origin(j);
+
+            kmer_2_buf.clear();
+            sbwts[origin_2].push_kmer_to_vec(index_2, &mut kmer_2_buf);
+            let kmer_2_str = str::from_utf8(&kmer_2_buf).unwrap();
+
+            let (extension, ordering) = lce.query(index_1, origin_1, index_2, origin_2);
+            let mut true_extension = 0;
+            for j in (0..k).rev() {
+                if kmer_1_buf[j] != kmer_2_buf[j] {
+                    break;
+                }
+                true_extension += 1;
+            }
+            if ordering == std::cmp::Ordering::Equal {
+                assert!(kmer_1_buf == kmer_2_buf, "{} {} {:?} {:?}", kmer_1_str, kmer_2_str, extension, ordering);
+            } else {
+                let mapping_1 = if origin_1 == 0 { &lce.rmq.sbwt_1_mapping } else { &lce.rmq.sbwt_2_mapping };
+                let mapping_2 = if origin_2 == 0 { &lce.rmq.sbwt_1_mapping } else { &lce.rmq.sbwt_2_mapping };
+                let node_1 = mapping_1.sbwt_to_tree[index_1];
+                let node_2 = mapping_2.sbwt_to_tree[index_2];
+                let branch_identifier_1 = mapping_1.branch_identifier[index_1];
+                let branch_identifier_2 = mapping_2.branch_identifier[index_2];
+                let correct = 
+                    true_extension == extension &&
+                    kmer_1_buf[k-extension..k] ==  kmer_2_buf[k-extension..k] &&
+                    kmer_1_buf[k-extension-1].cmp(&kmer_2_buf[k-extension-1]) == ordering;
+                if !correct {
+                    println!("node_2: {}", node_2);
+                    for climb in 1..=extension {
+                        kmer_1_parent_buf.clear();
+                        kmer_2_parent_buf.clear();
+                        let node_1_parent = lce.rmq.tree[lce.la_query(node_1, climb)].id;
+                        let node_2_parent = lce.rmq.tree[lce.la_query(node_2, climb)].id;
+                        let (node_1_rank, parent_origin_1) = index_and_origin(node_1_parent);
+                        let (node_2_rank, parent_origin_2) = index_and_origin(node_2_parent);
+                        sbwts[origin_1].push_kmer_to_vec(node_1_rank, &mut kmer_1_parent_buf);
+                        sbwts[origin_2].push_kmer_to_vec(node_2_rank, &mut kmer_2_parent_buf);
+                        println!("{}: {} {}",
+                            climb,
+                            str::from_utf8(&kmer_1_parent_buf).unwrap(),
+                            str::from_utf8(&kmer_2_parent_buf).unwrap(),
+                        );
+                    }
+                }
+                assert!(
+                    correct,
+                    "{} {} {} {:?} {} {}", kmer_1_str, kmer_2_str, extension, ordering,
+                    branch_identifier_1, branch_identifier_2,
+                );
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -511,7 +665,7 @@ mod test {
     use super::*;
     use super::LongestCommonExtension as LCE;
 
-    fn test_lce_from_sbwts(k: usize, seq_1: Vec<Vec<u8>>, seq_2: Vec<Vec<u8>>) 
+    fn test_lce_from_seqs(k: usize, seq_1: Vec<Vec<u8>>, seq_2: Vec<Vec<u8>>) 
     {
         let (mut sbwt_1, _) = BitPackedKmerSortingMem::new_from_vecs(&seq_1, k)
             .build_select_support(true)
@@ -520,53 +674,7 @@ mod test {
             .build_select_support(true)
             .run();
 
-        let sbwts = &[&sbwt_1, &sbwt_2];
-
-        let lce = LCE::new(&sbwt_1, &sbwt_2);
-        let offset = sbwt_1.n_sets();
-        let count = offset + sbwt_2.n_sets();
-        for i in 0..count {
-            let (index_1, origin_1) = if i < offset {
-                (i, 0)
-            } else {
-                (i - offset, 1)
-            };
-
-            let kmer_1 = sbwts[origin_1].access_kmer(index_1);
-            let kmer_1_str = str::from_utf8(&kmer_1).unwrap();
-            for j in 0..count {
-                if j == i {
-                    continue;
-                }
-                let (index_2, origin_2) = if j < offset {
-                    (j, 0)
-                } else {
-                    (j - offset, 1)
-                };
-
-                let kmer_2 = sbwts[origin_2].access_kmer(index_2);
-                let kmer_2_str = str::from_utf8(&kmer_2).unwrap();
-
-                let (extension, ordering) = lce.query(index_1, origin_1, index_2, origin_2);
-                let mut true_extension = 0;
-                for j in (0..k).rev() {
-                    if kmer_1[j] != kmer_2[j] {
-                        break;
-                    }
-                    true_extension += 1;
-                }
-                if ordering == std::cmp::Ordering::Equal {
-                    assert!(kmer_1 == kmer_2, "{} {} {:?} {:?}", kmer_1_str, kmer_2_str, extension, ordering);
-                } else {
-                    assert!(
-                        true_extension == extension &&
-                        kmer_1[k-extension..k] == kmer_2[k-extension..k] &&
-                        kmer_1[k-extension-1].cmp(&kmer_2[k-extension-1]) == ordering,
-                        "{} {} {:?} {:?}", kmer_1_str, kmer_2_str, extension, ordering
-                    );
-                }
-            }
-        }
+        test_lce_from_sbwts(&sbwt_1, &sbwt_2);
     }
 
     #[test]
@@ -588,7 +696,7 @@ mod test {
             b"ACACCAGGGAGGGG",
             b"ACAGGAGGGAGGGG",
         ];
-        test_lce_from_sbwts(k, seq_1, seq_2);
+        test_lce_from_seqs(k, seq_1, seq_2);
     }
 
     #[test]
@@ -602,7 +710,7 @@ mod test {
             b"CGCGCGCGCG",
             b"CGCGCATAT",
         ];
-        test_lce_from_sbwts(k, seq_1, seq_2);
+        test_lce_from_seqs(k, seq_1, seq_2);
     }
 
     #[test]
@@ -614,7 +722,7 @@ mod test {
         let seq_2 = seqs![
             b"CGCGCGCGCGATATAT",
         ];
-        test_lce_from_sbwts(k, seq_1, seq_2);
+        test_lce_from_seqs(k, seq_1, seq_2);
     }
 
     #[test]
@@ -626,7 +734,7 @@ mod test {
         let seq_2 = seqs![
             b"ATATATAT",
         ];
-        test_lce_from_sbwts(k, seq_1, seq_2);
+        test_lce_from_seqs(k, seq_1, seq_2);
     }
 
     #[test]
@@ -638,7 +746,7 @@ mod test {
         let seq_2 = seqs![
             b"CTACTACTACTACTA",
         ];
-        test_lce_from_sbwts(k, seq_1, seq_2);
+        test_lce_from_seqs(k, seq_1, seq_2);
     }
 
     #[test]
@@ -650,7 +758,7 @@ mod test {
         let seq_2 = seqs![
             b"CATCATCATCATCAT",
         ];
-        test_lce_from_sbwts(k, seq_1, seq_2);
+        test_lce_from_seqs(k, seq_1, seq_2);
     }
 
     #[test]
@@ -664,6 +772,6 @@ mod test {
             b"ACACACACACACAC",
             b"CGTGTCGTGTCGTGTCGTGT"
         ];
-        test_lce_from_sbwts(k, seq_1, seq_2);
+        test_lce_from_seqs(k, seq_1, seq_2);
     }
 }
