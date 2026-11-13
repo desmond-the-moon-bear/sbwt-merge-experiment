@@ -1,7 +1,7 @@
 // https://codeforces.com/blog/entry/126580
 // https://judge.yosupo.jp/submission/242808
 
-use super::Node;
+use crate::dctree::Node;
 
 #[derive(Debug)]
 pub struct NodeInfo {
@@ -202,7 +202,7 @@ mod test {
             .build_select_support(true)
             .run();
 
-        let decomposition = range_minimum_query(&sbwt_1, &sbwt_2);
+        let decomposition = crate::dctree::tree_decomposition_rmq(&sbwt_1, &sbwt_2);
         let la = LevelAncestorSupport::new(&decomposition.tree);
 
         for (node_index, node) in decomposition.tree.iter().enumerate() {

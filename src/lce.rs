@@ -1,4 +1,10 @@
-use super::*;
+use crate::dctree;
+use crate::dctree::*;
+
+use crate::LAQ;
+use sbwt::SbwtIndex;
+use sbwt::SubsetSeq;
+use sbwt::BitPackedKmerSortingMem;
 
 // branch_identifier:
 // (type:1) [0..=k]      - branch originally connected to the root
@@ -20,7 +26,7 @@ impl LongestCommonExtension {
         SS1: SubsetSeq,
         SS2: SubsetSeq,
     {
-        let rmq = range_minimum_query(sbwt_1, sbwt_2);
+        let rmq = dctree::tree_decomposition_rmq(sbwt_1, sbwt_2);
         let laq = LAQ::new(&rmq.tree);
 
         LongestCommonExtension {
@@ -503,6 +509,7 @@ impl LongestCommonExtension {
 #[cfg(test)]
 mod test {
     use super::*;
+    use super::LongestCommonExtension as LCE;
 
     fn test_lce_from_sbwts(k: usize, seq_1: Vec<Vec<u8>>, seq_2: Vec<Vec<u8>>) 
     {
