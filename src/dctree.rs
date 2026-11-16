@@ -73,11 +73,17 @@ where
     emit_tree_from_sbwt      (sbwt_2, &mut stack, &mut tree, &mut sbwt_2_mapping, &mut sbwt_2_mapped, sbwt_1_size);
     emit_components_from_sbwt(sbwt_2, &mut stack, &mut tree, &mut sbwt_2_mapping, &mut sbwt_2_mapped, sbwt_1_size);
 
-    for i in 0..sbwt_1_size {
-        assert!(sbwt_1_mapped[i]);
+    // for i in 0..sbwt_1_size {
+    //     assert!(sbwt_1_mapped[i]);
+    // }
+    // for i in 0..sbwt_2_size {
+    //     assert!(sbwt_2_mapped[i]);
+    // }
+    for i in 1..sbwt_1_size {
+        assert!(sbwt_1_mapping.branch_identifier[i] != 0, "1: {}", i);
     }
-    for i in 0..sbwt_2_size {
-        assert!(sbwt_2_mapped[i]);
+    for i in 1..sbwt_2_size {
+        assert!(sbwt_2_mapping.branch_identifier[i] != 0, "2: {}", i);
     }
 
     let tree_size = tree.len();
@@ -157,6 +163,9 @@ fn emit_tree_from_sbwt<SS: SubsetSeq>(
     stack.push((0, 0, 1));
     while let Some((sbwt_index, tree_parent, length)) = stack.pop() {
         let mut next_edge = tree_parent;
+        if sbwt_index == 212 && offset > 0 {
+            println!("tree of 11 type");
+        }
         if !mapped[sbwt_index] {
             let index = tree.len();
             next_edge = 0;
@@ -371,6 +380,9 @@ fn emit_short_loop_branches<SS: SubsetSeq>(
     for &(sbwt_index, _, _) in stack.iter() {
         mapped.set(sbwt_index, true);
         let tree_index = tree.len();
+        if sbwt_index == 212 && offset > 0 {
+            println!("short loop unravel");
+        }
         tree.push(Node {
             id: sbwt_index + offset,
             depth: 0,
@@ -387,12 +399,14 @@ fn emit_short_loop_branches<SS: SubsetSeq>(
     #[allow(clippy::needless_range_loop)]
     for loop_node_index in loop_nodes_start..loop_nodes_end {
         let current_sbwt_index = tree[loop_node_index].id - offset;
+
         stack.clear();
         stack.push((current_sbwt_index, 0, 0));
-
         while let Some((sbwt_index, tree_parent, mut branch_identifier)) = stack.pop() {
             let mut tree_index;
             let mut next_edge = tree_parent;
+
+            debug_assert!(sbwt_index == current_sbwt_index || branch_identifier != 0);
 
             if mapped[sbwt_index] {
                 tree_index = mapping.sbwt_to_tree[sbwt_index];
@@ -414,14 +428,16 @@ fn emit_short_loop_branches<SS: SubsetSeq>(
                 mapping.branch_identifier[sbwt_index] = branch_identifier;
             };
 
+
             while next_edge < alphabet.len() {
                 let character = &[alphabet[next_edge]];
                 let option_range = sbwt.search_from(sbwt_index..sbwt_index + 1, character);
                 next_edge += 1;
                 if let Some(range) = option_range && !mapped[range.start] {
                     if next_edge < alphabet.len() {
-                        stack.push((sbwt_index, next_edge, 0));
+                        stack.push((sbwt_index, next_edge, branch_identifier));
                     }
+                    debug_assert!(branch_identifier >= 2 * k);
                     stack.push((range.start, tree_index, branch_identifier)); 
                     break;
                 }

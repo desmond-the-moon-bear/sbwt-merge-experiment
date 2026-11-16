@@ -44,20 +44,20 @@ fn main() {
     sbwt_1.build_select();
     sbwt_2.build_select();
 
-    lce::test_lce_from_sbwts(&sbwt_1, &sbwt_2);
+    // lce::test_lce_from_sbwts(&sbwt_1, &sbwt_2);
 
-    // log::info!("canonic merge:");
-    // let canonic_merge = sbwt::MergeInterleaving::new(&sbwt_1, &sbwt_2, false, 7);
-    // log::info!("calculated merge:");
-    // let calculated_merge = merge::construct_merge_plan(&sbwt_1, &sbwt_2);
-    // println!("{} {}", canonic_merge.s1.len(), calculated_merge.s1.len());
-    // println!("{} {}", canonic_merge.s2.len(), calculated_merge.s2.len());
-    // println!("{} {}", canonic_merge.is_dummy.len(), calculated_merge.is_dummy.len());
-    // println!("{} {}", canonic_merge.is_leader.len(), calculated_merge.is_leader.len());
-    // println!("{}", canonic_merge.s1 == calculated_merge.s1);
-    // println!("{}", canonic_merge.s2 == calculated_merge.s2);
-    // println!("{}", canonic_merge.is_dummy == calculated_merge.is_dummy);
-    // println!("{}", canonic_merge.is_leader == calculated_merge.is_leader);
+    log::info!("canonic merge:");
+    let canonic_merge = sbwt::MergeInterleaving::new(&sbwt_1, &sbwt_2, false, 7);
+    log::info!("calculated merge:");
+    let calculated_merge = merge::construct_merge_plan(&sbwt_1, &sbwt_2);
+    println!("{} {}", canonic_merge.s1.len(), calculated_merge.s1.len());
+    println!("{} {}", canonic_merge.s2.len(), calculated_merge.s2.len());
+    println!("{} {}", canonic_merge.is_dummy.len(), calculated_merge.is_dummy.len());
+    println!("{} {}", canonic_merge.is_leader.len(), calculated_merge.is_leader.len());
+    println!("{}", canonic_merge.s1 == calculated_merge.s1);
+    println!("{}", canonic_merge.s2 == calculated_merge.s2);
+    println!("{}", canonic_merge.is_dummy == calculated_merge.is_dummy);
+    println!("{}", canonic_merge.is_leader == calculated_merge.is_leader);
 }
 
 fn mini_test() {
