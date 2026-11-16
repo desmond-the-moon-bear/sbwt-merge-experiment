@@ -521,66 +521,123 @@ pub fn test_lce_from_sbwts<SS: SubsetSeq>(sbwt_1: &SbwtIndex<SS>, sbwt_2: &SbwtI
 
     let lce = LongestCommonExtension::new(sbwt_1, sbwt_2);
 
-    // log::info!("testing laq:");
-    // fn level_ancestor_query(tree: &[Node], mut node: usize, mut climb: usize) -> usize {
-    //     while climb > 0 {
-    //         node = tree[node].parent;
-    //         climb -= 1;
-    //     }
-    //     node
-    // }
-    // let node_index = 824427;
-    // let climb: usize = 3;
-    // let most_significant_bit = usize::BITS - 1 - (climb / 3).leading_zeros();
-    // let target_power_of_2 = 1_i64 << most_significant_bit;
-    // let euler_index_of_node = lce.laq.auxiliary_info[node_index].euler_index;
-    // let euler_index = (euler_index_of_node & (-target_power_of_2)) | target_power_of_2;
-    //
-    // let largest_power_dividing = euler_index_of_node.isolate_lowest_one();
-    // println!("    euler index of node {}", euler_index_of_node);
-    // println!("lpd euler index of node {}", largest_power_dividing);
-    // let largest_power_dividing = euler_index.isolate_lowest_one();
-    // println!("    euler index found   {}", euler_index);
-    // println!("lpd euler index found   {}", largest_power_dividing);
-    //
-    // // Euler index is 1 based.
-    // let (jump_1, jump_2) = lce.laq.jump_pointers[euler_index as usize - 1];
-    // println!("{} {}", jump_1, jump_2);
-    // let leaf = if lce.rmq.tree[node_index].depth - lce.rmq.tree[jump_2].depth <= climb {
-    //     println!("bigger jump");
-    //     lce.laq.auxiliary_info[jump_2].deepest_leaf
-    // } else {
-    //     println!("smaller jump");
-    //     lce.laq.auxiliary_info[jump_1].deepest_leaf
-    // };
-    // let ladder_start = lce.laq.auxiliary_info[leaf].ladder_start;
-    // let rungs = climb + lce.rmq.tree[leaf].depth - lce.rmq.tree[node_index].depth;
-    // debug_assert!(rungs <= lce.laq.auxiliary_info[leaf].ladder_length);
-    //
-    // let mut p = node_index;
-    // for i in 0..10 {
-    //     print!("{} <- ", p);
-    //     p = lce.rmq.tree[p].parent;
-    // }
-    // println!();
+    log::info!("testing laq:");
+    fn level_ancestor_query(tree: &[Node], mut node: usize, mut climb: usize) -> usize {
+        while climb > 0 {
+            node = tree[node].parent;
+            climb -= 1;
+        }
+        node
+    }
 
-    // println!("{:?}", &lce.laq.ladder_values[ladder_start..ladder_start + lce.laq.auxiliary_info[leaf].ladder_length]);
-    // println!("{}{:?}", leaf, &lce.laq.ladder_values[ladder_start..ladder_start + rungs]);
-    // let my_leaf               = lce.laq.auxiliary_info[node_index].deepest_leaf;
-    // let my_leaf_depth         = lce.rmq.tree[my_leaf].depth;
-    // let my_leaf_ladder_start  = lce.laq.auxiliary_info[my_leaf].ladder_start;
-    // let my_leaf_ladder_length = lce.laq.auxiliary_info[my_leaf].ladder_length;
-    // println!("{}{:?}", my_leaf, &lce.laq.ladder_values[my_leaf_ladder_start..my_leaf_ladder_start + my_leaf_ladder_length]);
-
-    // for (node_index, node) in lce.rmq.tree.iter().enumerate() {
+    for (node_index, node) in lce.rmq.tree.iter().enumerate() {
         // let max_depth = node.depth;
-        // let max_depth = lce.rmq.tree[node_index].depth;
-        // for climb in 0..max_depth {
-        //     let invariant = level_ancestor_query(&lce.rmq.tree, node_index, climb);
-        //     let found     = lce.laq.query       (&lce.rmq.tree, node_index, climb);
-        //     assert_eq!(invariant, found, "node_index: {}; climb: {}", node_index, climb);
-        // }
-    // }
+        let max_depth = (2 * k).min(lce.rmq.tree[node_index].depth);
+        for climb in 0..max_depth {
+            let invariant = level_ancestor_query(&lce.rmq.tree, node_index, climb);
+            let found     = lce.laq.query       (&lce.rmq.tree, node_index, climb);
+            // if invariant == found {
+            //     continue;
+            // }
+            //
+            // println!("node_index: {}", node_index);
+            // let target_power_of_2 = 1_i64 << crate::level::msb(climb / 3);
+            // let euler_index_of_node = lce.laq.auxiliary_info[node_index].euler_index;
+            // let euler_index = (euler_index_of_node & (-target_power_of_2)) | target_power_of_2;
+            //
+            // let largest_power_dividing = euler_index_of_node.isolate_lowest_one();
+            // println!("    euler index of node {}", euler_index_of_node);
+            // println!("lpd euler index of node {}", largest_power_dividing);
+            // let largest_power_dividing = euler_index.isolate_lowest_one();
+            // println!("    euler index found   {}", euler_index);
+            // println!("lpd euler index found   {}/{}", largest_power_dividing, climb);
+            //
+            // let alt_jp = lce.laq.jump_pointers[euler_index_of_node as usize - 1];
+            // println!("alternative jump pointers (i.e. of euler index of node) {:?}", alt_jp);
+            // println!("respective deepest leaf {}, {}",
+            //     lce.laq.auxiliary_info[alt_jp.0].deepest_leaf,
+            //     lce.laq.auxiliary_info[alt_jp.1].deepest_leaf
+            // );
+            //
+            // // Euler index is 1 based.
+            // let (jump_1, jump_2) = lce.laq.jump_pointers[euler_index as usize - 1];
+            // println!("{} {}", jump_1, jump_2);
+            //
+            // let mut p = node_index;
+            // let mut count = 0;
+            // while p > 0 {
+            //     p = lce.rmq.tree[p].parent;
+            //     count += 1;
+            //     if p == jump_1 {
+            //         println!("found jump_1 after {} steps", count);
+            //     }
+            //     if p == jump_2 {
+            //         println!("found jump_2 after {} steps", count);
+            //     }
+            // }
+            //
+            // let leaf = if lce.rmq.tree[node_index].depth - lce.rmq.tree[jump_2].depth <= climb {
+            //     println!("bigger jump");
+            //     lce.laq.auxiliary_info[jump_2].deepest_leaf
+            // } else {
+            //     println!("smaller jump");
+            //     lce.laq.auxiliary_info[jump_1].deepest_leaf
+            // };
+            //
+            // println!("===== leaf: {}", leaf);
+            //
+            //
+            // let mut p = leaf;
+            // let mut count = 0;
+            // while p > 0 {
+            //     p = lce.rmq.tree[p].parent;
+            //     count += 1;
+            //     if p == jump_1 {
+            //         println!("leaf search: found jump_1 after {} steps", count);
+            //     }
+            //     if p == jump_2 {
+            //         println!("leaf search: found jump_2 after {} steps", count);
+            //     }
+            // }
+            //
+            //
+            // let ladder_start = lce.laq.auxiliary_info[leaf].ladder_start;
+            // let jump_1_depth = lce.rmq.tree[jump_1].depth;
+            // let jump_2_depth = lce.rmq.tree[jump_2].depth;
+            // let leaf_depth = lce.rmq.tree[leaf].depth;
+            //
+            // println!("value at ladder for jump_1({}): {}",
+            //     jump_1, lce.laq.ladder_values[ladder_start..][leaf_depth - jump_1_depth - 1]);
+            // println!("value at ladder for jump_2({}): {}",
+            //     jump_2, lce.laq.ladder_values[ladder_start..][leaf_depth - jump_2_depth - 1]);
+            //
+            // let rungs = climb + lce.rmq.tree[leaf].depth - lce.rmq.tree[node_index].depth;
+            // println!("climb: {}, leaf_depth: {}, self_depth: {}",
+            //     climb,
+            //     lce.rmq.tree[leaf].depth,
+            //     lce.rmq.tree[node_index].depth
+            // );
+            // println!("rungs: {}", rungs);
+            // debug_assert!(rungs <= lce.laq.auxiliary_info[leaf].ladder_length);
+            //
+            // let my_leaf               = lce.laq.auxiliary_info[node_index].deepest_leaf;
+            // let my_leaf_depth         = lce.rmq.tree[my_leaf].depth;
+            // let my_leaf_ladder_start  = lce.laq.auxiliary_info[my_leaf].ladder_start;
+            // let my_leaf_ladder_length = lce.laq.auxiliary_info[my_leaf].ladder_length;
+            //
+            // let mut p = my_leaf;
+            // let mut count = 0;
+            // while p > 0 {
+            //     p = lce.rmq.tree[p].parent;
+            //     count += 1;
+            //     if p == node_index {
+            //         println!("found node_index from leaf after {} steps upward", count);
+            //     }
+            // }
+
+            assert_eq!(invariant, found, "node_index: {}; climb: {}", node_index, climb);
+        }
+    }
 
     log::info!("testing lce:");
     let offset = sbwt_1.n_sets();
@@ -619,43 +676,43 @@ pub fn test_lce_from_sbwts<SS: SubsetSeq>(sbwt_1: &SbwtIndex<SS>, sbwt_2: &SbwtI
                 }
                 true_extension += 1;
             }
-            if ordering == std::cmp::Ordering::Equal {
-                assert!(kmer_1_buf == kmer_2_buf, "{} {} {:?} {:?}", kmer_1_str, kmer_2_str, extension, ordering);
+            let correct = if ordering == std::cmp::Ordering::Equal {
+                kmer_1_buf == kmer_2_buf
             } else {
-                let mapping_1 = if origin_1 == 0 { &lce.rmq.sbwt_1_mapping } else { &lce.rmq.sbwt_2_mapping };
-                let mapping_2 = if origin_2 == 0 { &lce.rmq.sbwt_1_mapping } else { &lce.rmq.sbwt_2_mapping };
-                let node_1 = mapping_1.sbwt_to_tree[index_1];
-                let node_2 = mapping_2.sbwt_to_tree[index_2];
-                let branch_identifier_1 = mapping_1.branch_identifier[index_1];
-                let branch_identifier_2 = mapping_2.branch_identifier[index_2];
-                let correct = 
-                    true_extension == extension &&
-                    kmer_1_buf[k-extension..k] ==  kmer_2_buf[k-extension..k] &&
-                    kmer_1_buf[k-extension-1].cmp(&kmer_2_buf[k-extension-1]) == ordering;
-                if !correct {
-                    println!("node_2: {}", node_2);
-                    for climb in 1..=extension {
-                        kmer_1_parent_buf.clear();
-                        kmer_2_parent_buf.clear();
-                        let node_1_parent = lce.rmq.tree[lce.la_query(node_1, climb)].id;
-                        let node_2_parent = lce.rmq.tree[lce.la_query(node_2, climb)].id;
-                        let (node_1_rank, parent_origin_1) = index_and_origin(node_1_parent);
-                        let (node_2_rank, parent_origin_2) = index_and_origin(node_2_parent);
-                        sbwts[origin_1].push_kmer_to_vec(node_1_rank, &mut kmer_1_parent_buf);
-                        sbwts[origin_2].push_kmer_to_vec(node_2_rank, &mut kmer_2_parent_buf);
-                        println!("{}: {} {}",
-                            climb,
-                            str::from_utf8(&kmer_1_parent_buf).unwrap(),
-                            str::from_utf8(&kmer_2_parent_buf).unwrap(),
-                        );
-                    }
+                true_extension == extension &&
+                kmer_1_buf[k-extension..k] ==  kmer_2_buf[k-extension..k] &&
+                kmer_1_buf[k-extension-1].cmp(&kmer_2_buf[k-extension-1]) == ordering
+            };
+            let mapping_1 = if origin_1 == 0 { &lce.rmq.sbwt_1_mapping } else { &lce.rmq.sbwt_2_mapping };
+            let mapping_2 = if origin_2 == 0 { &lce.rmq.sbwt_1_mapping } else { &lce.rmq.sbwt_2_mapping };
+            let node_1 = mapping_1.sbwt_to_tree[index_1];
+            let node_2 = mapping_2.sbwt_to_tree[index_2];
+            let branch_identifier_1 = mapping_1.branch_identifier[index_1];
+            let branch_identifier_2 = mapping_2.branch_identifier[index_2];
+            if !correct {
+                println!("index_1: {}, origin_1: {}, node_1: {}", index_1, origin_1, node_1);
+                println!("index_2: {}, origin_2: {}, node_2: {}", index_2, origin_2, node_2);
+                for climb in 1..=extension {
+                    kmer_1_parent_buf.clear();
+                    kmer_2_parent_buf.clear();
+                    let node_1_parent = lce.rmq.tree[lce.la_query(node_1, climb)].id;
+                    let node_2_parent = lce.rmq.tree[lce.la_query(node_2, climb)].id;
+                    let (node_1_rank, parent_origin_1) = index_and_origin(node_1_parent);
+                    let (node_2_rank, parent_origin_2) = index_and_origin(node_2_parent);
+                    sbwts[origin_1].push_kmer_to_vec(node_1_rank, &mut kmer_1_parent_buf);
+                    sbwts[origin_2].push_kmer_to_vec(node_2_rank, &mut kmer_2_parent_buf);
+                    println!("{}: {} {}",
+                        climb,
+                        str::from_utf8(&kmer_1_parent_buf).unwrap(),
+                        str::from_utf8(&kmer_2_parent_buf).unwrap(),
+                    );
                 }
-                assert!(
-                    correct,
-                    "{} {} {} {:?} {} {}", kmer_1_str, kmer_2_str, extension, ordering,
-                    branch_identifier_1, branch_identifier_2,
-                );
             }
+            assert!(
+                correct,
+                "{} {} {} {:?} {} {}", kmer_1_str, kmer_2_str, extension, ordering,
+                branch_identifier_1, branch_identifier_2,
+            );
         }
     }
 }

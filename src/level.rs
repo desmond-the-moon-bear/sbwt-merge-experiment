@@ -110,8 +110,7 @@ impl LevelAncestorSupport {
                 let node_info = &mut auxiliary_info[deepest_leaf];
                 node_info.ladder_start = ladder_values.len();
                 let deepest_leaf_depth = tree[deepest_leaf].depth;
-                // let ladder_length = ((deepest_leaf_depth - node.depth) * 2).min(deepest_leaf_depth); 
-                let ladder_length = ((deepest_leaf_depth - node.depth) * 3).min(deepest_leaf_depth); 
+                let ladder_length = ((deepest_leaf_depth - node.depth) * 2).min(deepest_leaf_depth); 
                 node_info.ladder_length = ladder_length;
 
                 let mut ladder_rung = tree[deepest_leaf].parent;
@@ -135,8 +134,8 @@ impl LevelAncestorSupport {
             1 => tree[node].parent,
             2 => tree[tree[node].parent].parent,
             _ => {
-                let most_significant_bit = usize::BITS - 1 - (climb / 3).leading_zeros();
-                let target_power_of_2 = 1_i64 << most_significant_bit;
+                let target_power_of_2 = 1_i64 << msb(climb / 3);
+                // println!("target_power_of_2: {}, climb: {}", target_power_of_2, climb);
                 let euler_index_of_node = self.auxiliary_info[node].euler_index;
                 let euler_index = (euler_index_of_node & (-target_power_of_2)) | target_power_of_2;
 
@@ -159,6 +158,11 @@ impl LevelAncestorSupport {
     }
 }
 
+#[inline(always)]
+pub fn msb(value: usize) -> u32 {
+    usize::BITS - 1 - value.leading_zeros()
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
@@ -177,47 +181,70 @@ mod test {
         node
     }
 
+    fn test_level_ancestor(tree: &[Node]) {
+        let la = LevelAncestorSupport::new(tree);
+        for (node_index, node) in tree.iter().enumerate() {
+            let max_depth = node.depth;
+            for climb in 0..max_depth {
+                let invariant = level_ancestor_query(tree, node_index, climb);
+                let found     = la.query            (tree, node_index, climb);
+                assert_eq!(invariant, found, "node_index: {}; climb: {}", node_index, climb);
+            }
+        }
+    }
+
     #[test]
-    fn level_ancestor_test() {
+    fn test_1() {
         let k = 7;
         let seq_1 = seqs![
-            b"AAAAAAC",
-            b"AAAAAAT",
-            // b"AACCCCC",
-            // b"AAGGGGG",
-            // b"TTCCCCG",
-            // b"GCGCGCGCG",
-            // b"GCGCGCA",
-            // b"GCGCGCT",
+            b"AACCCCC",
+            b"AAGGGGG",
+            b"TTCCCCG",
+            b"GCGCGCGCG",
+            b"GCGCGCA",
+            b"GCGCGCT",
         ];
         let (mut sbwt_1, _) = BitPackedKmerSortingMem::new_from_vecs(&seq_1, k)
             .build_select_support(true)
             .run();
-
         let seq_2 = seqs![
-            b"AAAAAAG",
-            // b"AACCCCC",
-            // b"CCGGGGG",
-            // b"CCTTTTT",
-            // b"ACACCACCCACCCC",
-            // b"ACACCAGGGAGGGG",
-            // b"ACAGGAGGGAGGGG",
+            b"AACCCCC",
+            b"CCGGGGG",
+            b"CCTTTTT",
+            b"ACACCACCCACCCC",
+            b"ACACCAGGGAGGGG",
+            b"ACAGGAGGGAGGGG",
         ];
         let (mut sbwt_2, _) = BitPackedKmerSortingMem::new_from_vecs(&seq_2, k)
             .build_select_support(true)
             .run();
-
         let decomposition = crate::dctree::tree_decomposition_rmq(&sbwt_1, &sbwt_2);
-        let la = LevelAncestorSupport::new(&decomposition.tree);
+        test_level_ancestor(&decomposition.tree);
+    }
 
-        for (node_index, node) in decomposition.tree.iter().enumerate() {
-            let max_depth = node.depth;
-            for climb in 0..max_depth {
-                let invariant = level_ancestor_query(&decomposition.tree, node_index, climb);
-                let found     = la.query            (&decomposition.tree, node_index, climb);
-                assert_eq!(invariant, found, "node_index: {}; climb: {}", node_index, climb);
-            }
+    fn node(parent: usize) -> Node {
+        Node { id: 0, depth: 0, parent, name: 0 }
+    }
+
+    #[test]
+    fn test_2() {
+        let mut tree = vec![
+            node(0), // 0
+            node(0), // 1
+            node(1), // 2
+            node(2), // 3
+            node(3), // 4
+            node(4), // 5
+            node(3), // 6
+            node(6), // 7
+            node(7), // 8
+            node(8), // 9
+            node(9), // 10
+        ];
+        for i in 1..tree.len() {
+            tree[i].depth = tree[tree[i].parent].depth + 1;
         }
+        test_level_ancestor(&tree);
     }
 }
 

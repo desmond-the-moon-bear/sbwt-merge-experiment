@@ -73,6 +73,13 @@ where
     emit_tree_from_sbwt      (sbwt_2, &mut stack, &mut tree, &mut sbwt_2_mapping, &mut sbwt_2_mapped, sbwt_1_size);
     emit_components_from_sbwt(sbwt_2, &mut stack, &mut tree, &mut sbwt_2_mapping, &mut sbwt_2_mapped, sbwt_1_size);
 
+    for i in 0..sbwt_1_size {
+        assert!(sbwt_1_mapped[i]);
+    }
+    for i in 0..sbwt_2_size {
+        assert!(sbwt_2_mapped[i]);
+    }
+
     let tree_size = tree.len();
 
     let mut order = vec![0_usize; tree_size];
@@ -145,36 +152,35 @@ fn emit_tree_from_sbwt<SS: SubsetSeq>(
     let alphabet = sbwt.alphabet();
     let k = sbwt.k();
 
-    println!("{}", sbwt.n_kmers());
+    mapped.set(0, true);
     stack.clear();
     stack.push((0, 0, 1));
     while let Some((sbwt_index, tree_parent, length)) = stack.pop() {
-        if sbwt_index >= sbwt.n_sets() {
-            panic!("wut ?");
-        }
-        let tree_index = if sbwt_index != 0 {
+        let mut next_edge = tree_parent;
+        if !mapped[sbwt_index] {
             let index = tree.len();
+            next_edge = 0;
             tree.push(Node {
                 id: sbwt_index + offset,
                 depth: 0,
                 parent: tree_parent,
                 name: inedge_name(sbwt_index, &c_array),
             });
-            index
-        } else {
-            0
-        };
-
-        mapped.set(sbwt_index, true);
-        mapping.sbwt_to_tree[sbwt_index] = tree_index;
-        mapping.branch_identifier [sbwt_index] = length;
-
-        for (character_index, &character) in alphabet.iter().enumerate() {
-            let option_range = sbwt.search_from(sbwt_index..sbwt_index + 1, &[character]);
+            mapped.set(sbwt_index, true);
+            mapping.sbwt_to_tree[sbwt_index] = index;
+            mapping.branch_identifier[sbwt_index] = length;
+        }
+        let tree_index = mapping.sbwt_to_tree[sbwt_index];
+        while next_edge < alphabet.len() {
+            let character = &[alphabet[next_edge]];
+            let option_range = sbwt.search_from(sbwt_index..sbwt_index + 1, character);
+            next_edge += 1;
             if let Some(range) = option_range {
-                println!("{:?}", range);
-                // $ is 1; A is 2; C is 3 and so on...
+                if next_edge < alphabet.len() {
+                    stack.push((sbwt_index, next_edge, length));
+                }
                 stack.push((range.start, tree_index, (length + 1).min(k))); 
+                break;
             }
         }
     }
@@ -260,55 +266,164 @@ fn emit_components_from_sbwt<SS: SubsetSeq>(
             parent = tree_index;
         }
 
-        // Second instance of the necklace:
-        let mut loop_branch_identifier = 0;
-        for &(sbwt_index, _, _) in stack.iter() {
-            mapped.set(sbwt_index, true);
-            let tree_index = tree.len();
+        if loop_length >= k {
+            emit_long_loop_branch(
+                sbwt,
+                &c_array,
+                stack,
+                tree,
+                mapping,
+                mapped,
+                offset,
+                current_sbwt_index,
+                parent,
+            );
+        } else {
+            emit_short_loop_branches(
+                sbwt,
+                &c_array,
+                stack,
+                tree,
+                mapping,
+                mapped,
+                offset,
+                current_sbwt_index,
+                parent,
+            );
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn emit_long_loop_branch<SS: SubsetSeq>(
+    sbwt: &SbwtIndex<SS>,
+    c_array: &[usize],
+    stack: &mut Vec<(usize, usize, usize)>,
+    tree: &mut Vec<Node>,
+    mapping: &mut MappingInformation,
+    mapped: &mut BitVec,
+    offset: usize,
+    current_sbwt_index: usize,
+    mut necklace_parent: usize,
+) {
+    let k = sbwt.k();
+    let alphabet = sbwt.alphabet();
+
+    // Explore the subtrees of the necklace:
+    stack.clear();
+    stack.push((current_sbwt_index, necklace_parent, 0));
+    while let Some((sbwt_index, tree_parent, _)) = stack.pop() {
+        let mut tree_index;
+        let mut next_edge = tree_parent;
+
+        if mapped[sbwt_index] {
+            tree_index = mapping.sbwt_to_tree[sbwt_index];
+        } else {
+            tree_index = tree.len();
+            next_edge = 0;
             tree.push(Node {
                 id: sbwt_index + offset,
                 depth: 0,
-                parent,
-                name: inedge_name(sbwt_index, &c_array),
+                parent: tree_parent,
+                name: inedge_name(sbwt_index, c_array),
             });
+            mapped.set(sbwt_index, true);
             mapping.sbwt_to_tree[sbwt_index] = tree_index;
-            if loop_length < k {
-                loop_branch_identifier += 1;
-            }
-            mapping.branch_identifier[sbwt_index] = k + loop_branch_identifier;
-            parent = tree_index;
-        }
+            mapping.branch_identifier[sbwt_index] = k;
+        };
 
-        // Explore the subtrees of the necklace:
+        while next_edge < alphabet.len() {
+            let character = &[alphabet[next_edge]];
+            let option_range = sbwt.search_from(sbwt_index..sbwt_index + 1, character);
+            next_edge += 1;
+            if let Some(range) = option_range && range.start != current_sbwt_index {
+                if next_edge < alphabet.len() {
+                    stack.push((sbwt_index, next_edge, 0));
+                }
+                stack.push((range.start, tree_index, 0)); 
+                break;
+            }
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn emit_short_loop_branches<SS: SubsetSeq>(
+    sbwt: &SbwtIndex<SS>,
+    c_array: &[usize],
+    stack: &mut Vec<(usize, usize, usize)>,
+    tree: &mut Vec<Node>,
+    mapping: &mut MappingInformation,
+    mapped: &mut BitVec,
+    offset: usize,
+    current_sbwt_index: usize,
+    mut necklace_parent: usize,
+) {
+    let k = sbwt.k();
+    let alphabet = sbwt.alphabet();
+    let loop_length = stack.len();
+
+    let loop_nodes_start = tree.len();
+    let loop_nodes_end = loop_nodes_start + loop_length;
+
+    // Second instance of the necklace.
+    let mut loop_branch_identifier = 0;
+    for &(sbwt_index, _, _) in stack.iter() {
+        mapped.set(sbwt_index, true);
+        let tree_index = tree.len();
+        tree.push(Node {
+            id: sbwt_index + offset,
+            depth: 0,
+            parent: necklace_parent,
+            name: inedge_name(sbwt_index, c_array),
+        });
+        loop_branch_identifier += 1;
+        mapping.sbwt_to_tree[sbwt_index] = tree_index;
+        mapping.branch_identifier[sbwt_index] = k + loop_branch_identifier;
+        necklace_parent = tree_index;
+    }
+
+    // Explore the subtrees of the necklace:
+    #[allow(clippy::needless_range_loop)]
+    for loop_node_index in loop_nodes_start..loop_nodes_end {
+        let current_sbwt_index = tree[loop_node_index].id - offset;
         stack.clear();
         stack.push((current_sbwt_index, 0, 0));
+
         while let Some((sbwt_index, tree_parent, mut branch_identifier)) = stack.pop() {
-            let attachment_point = if mapped[sbwt_index] {
-                if loop_length >= k {
-                    branch_identifier = k;
-                    mapping.sbwt_to_tree[sbwt_index]
-                } else {
-                    branch_identifier = 2 * k + mapping.sbwt_to_tree[sbwt_index];
-                    0
+            let mut tree_index;
+            let mut next_edge = tree_parent;
+
+            if mapped[sbwt_index] {
+                tree_index = mapping.sbwt_to_tree[sbwt_index];
+                if sbwt_index == current_sbwt_index {
+                    tree_index = 0;
+                    branch_identifier = 2 * k + loop_node_index;
                 }
             } else {
-                let index = tree.len();
+                tree_index = tree.len();
+                next_edge = 0;
                 tree.push(Node {
                     id: sbwt_index + offset,
                     depth: 0,
                     parent: tree_parent,
-                    name: inedge_name(sbwt_index, &c_array),
+                    name: inedge_name(sbwt_index, c_array),
                 });
                 mapped.set(sbwt_index, true);
-                mapping.sbwt_to_tree[sbwt_index] = index;
+                mapping.sbwt_to_tree[sbwt_index] = tree_index;
                 mapping.branch_identifier[sbwt_index] = branch_identifier;
-                index
             };
 
-            for (character_index, &character) in alphabet.iter().enumerate() {
-                let option_range = sbwt.search_from(sbwt_index..sbwt_index + 1, &[character]);
-                if let Some(range) = option_range && range.start != current_sbwt_index {
-                    stack.push((range.start, attachment_point, branch_identifier)); 
+            while next_edge < alphabet.len() {
+                let character = &[alphabet[next_edge]];
+                let option_range = sbwt.search_from(sbwt_index..sbwt_index + 1, character);
+                next_edge += 1;
+                if let Some(range) = option_range && !mapped[range.start] {
+                    if next_edge < alphabet.len() {
+                        stack.push((sbwt_index, next_edge, 0));
+                    }
+                    stack.push((range.start, tree_index, branch_identifier)); 
+                    break;
                 }
             }
         }
@@ -786,5 +901,12 @@ fn calculate_lcp_and_name_length(
         current_parent_parent_sample_index,
     );
     (lcp, name_length)
+}
+
+#[cfg(test)]
+mod tests {
+    // TODO: write a test for the decomposition of the SBWT tree to make sure that the order the
+    // nodes are traversed is compatible with the level ancestor query support construction
+    // procedure.
 }
 
