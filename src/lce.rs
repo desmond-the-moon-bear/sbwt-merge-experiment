@@ -2,9 +2,9 @@ use crate::dctree;
 use crate::dctree::*;
 
 use crate::LAQ;
-use sbwt::SbwtIndex;
 use sbwt::SubsetSeq;
 use sbwt::BitPackedKmerSortingMem;
+use sbwt::sbwt_index_variant::SbwtIndexVariant;
 
 // branch_identifier:
 // (type:1) [0..=k]      - branch originally connected to the root
@@ -18,43 +18,39 @@ use sbwt::BitPackedKmerSortingMem;
 
 pub struct LongestCommonExtension {
     pub k: usize,
-    pub offset: usize,
-    pub rmq: TreeDecompositionRMQ,
+    pub decomp: TreeDecompositionRMQ,
     pub laq: LAQ,
 }
 
 impl LongestCommonExtension {
-    pub fn new<SS1: SubsetSeq, SS2: SubsetSeq>(sbwt_1: &SbwtIndex<SS1>, sbwt_2: &SbwtIndex<SS2>) -> LongestCommonExtension
+    pub fn new(sbwts: &[&SbwtIndexVariant]) -> LongestCommonExtension
     {
         log::info!("tree decomposition:");
-        let rmq = dctree::tree_decomposition_rmq(sbwt_1, sbwt_2);
+        let decomp = dctree::tree_decomposition_rmq(sbwts);
         log::info!("level ancestor queries:");
-        let laq = LAQ::new(&rmq.tree);
+        let laq = LAQ::new(&decomp.tree);
 
         LongestCommonExtension {
-            k: sbwt_1.k(),
-            offset: sbwt_1.n_sets(),
+            k: sbwts[0].k(),
             laq,
-            rmq,
+            decomp,
         }
     }
 
     pub fn query(
         &self,
-        sbwt_index_1: usize,
-        sbwt_origin_1: usize,
-        sbwt_index_2: usize,
-        sbwt_origin_2: usize
+        colex_rank_1: usize,
+        origin_1: usize,
+        colex_rank_2: usize,
+        origin_2: usize
     ) -> (usize, std::cmp::Ordering) {
-        if sbwt_index_1 == 0 && sbwt_index_2 == 0 {
+        if colex_rank_1 == 0 && colex_rank_2 == 0 {
             return (self.k, std::cmp::Ordering::Equal);
         }
-        let mapping_1 = if sbwt_origin_1 == 0 { &self.rmq.sbwt_1_mapping } else { &self.rmq.sbwt_2_mapping };
-        let mapping_2 = if sbwt_origin_2 == 0 { &self.rmq.sbwt_1_mapping } else { &self.rmq.sbwt_2_mapping };
-        let node_1 = mapping_1.sbwt_to_tree[sbwt_index_1];
-        let node_2 = mapping_2.sbwt_to_tree[sbwt_index_2];
-        let branch_identifier_1 = mapping_1.branch_identifier[sbwt_index_1];
-        let branch_identifier_2 = mapping_2.branch_identifier[sbwt_index_2];
+        let node_1 = self.decomp.mapping.node(colex_rank_1, origin_1);
+        let node_2 = self.decomp.mapping.node(colex_rank_2, origin_2);
+        let branch_identifier_1 = self.decomp.mapping.branch_id(colex_rank_1, origin_1);
+        let branch_identifier_2 = self.decomp.mapping.branch_id(colex_rank_2, origin_2);
         self.query_nodes(node_1, branch_identifier_1, node_2, branch_identifier_2)
     }
 
@@ -93,7 +89,7 @@ impl LongestCommonExtension {
                 if subtree_extension >= k {
                     return (k, std::cmp::Ordering::Equal);
                 }
-                if subtree_extension < self.rmq.tree[node_2].depth {
+                if subtree_extension < self.decomp.tree[node_2].depth {
                     // We have not reached the loop.
                     let mut ordering = if subtree_extension == branch_identifier_1 {
                         // node_1 corresponds to a dummy, therefore, it is smaller since node_2 is
@@ -124,7 +120,7 @@ impl LongestCommonExtension {
             if first_loop_extension + subtree_extension >= k {
                 return (k, std::cmp::Ordering::Equal);
             }
-            if first_loop_extension < self.rmq.tree[node_2].depth {
+            if first_loop_extension < self.decomp.tree[node_2].depth {
                 let mut ordering = if first_loop_extension == branch_identifier_1 {
                     std::cmp::Ordering::Less
                 } else {
@@ -136,9 +132,9 @@ impl LongestCommonExtension {
                 return (first_loop_extension + subtree_extension, ordering);
             }
 
-            let loop_2_length = self.rmq.tree[node_2].depth + k - branch_identifier_2;
-            let depth_in_loop_2 = self.rmq.tree[node_2].depth - loop_2_length;
-            debug_assert!(loop_2_length + depth_in_loop_2 == self.rmq.tree[node_2].depth);
+            let loop_2_length = self.decomp.tree[node_2].depth + k - branch_identifier_2;
+            let depth_in_loop_2 = self.decomp.tree[node_2].depth - loop_2_length;
+            debug_assert!(loop_2_length + depth_in_loop_2 == self.decomp.tree[node_2].depth);
 
             // <---------> loop length
             //             <------> depth in loop
@@ -171,7 +167,7 @@ impl LongestCommonExtension {
                 sample_branch_identifier,
             );
 
-            let total_extension = extension + self.rmq.tree[node_2].depth + subtree_extension;
+            let total_extension = extension + self.decomp.tree[node_2].depth + subtree_extension;
             if total_extension >= k {
                 return (k, std::cmp::Ordering::Equal);
             }
@@ -234,12 +230,12 @@ impl LongestCommonExtension {
 
         let subtree_extension = self.rm_query(node_1, node_2);
 
-        if subtree_extension < self.rmq.tree[node_1].depth && subtree_extension < self.rmq.tree[node_2].depth {
+        if subtree_extension < self.decomp.tree[node_1].depth && subtree_extension < self.decomp.tree[node_2].depth {
             let ordering = self.compare_ancestors(node_1, node_2, subtree_extension);
             return (subtree_extension, ordering);
         }
 
-        if subtree_extension >= self.rmq.tree[node_1].depth {
+        if subtree_extension >= self.decomp.tree[node_1].depth {
             node_1 = branch_identifier_1 - 2 * k;
             branch_identifier_1 = self.find_branch_identifier(node_1);
             debug_assert!(k < branch_identifier_1 && branch_identifier_1 < 2 * k);
@@ -249,7 +245,7 @@ impl LongestCommonExtension {
             debug_assert!(2 * k <= branch_identifier_1);
         }
 
-        if subtree_extension >= self.rmq.tree[node_2].depth {
+        if subtree_extension >= self.decomp.tree[node_2].depth {
             node_2 = branch_identifier_2 - 2 * k;
             branch_identifier_2 = self.find_branch_identifier(node_2);
             debug_assert!(k < branch_identifier_2 && branch_identifier_2 < 2 * k);
@@ -328,19 +324,19 @@ impl LongestCommonExtension {
 
         let mut subtree_extension = self.rm_query(node_1, node_2);
 
-        if subtree_extension < self.rmq.tree[node_1].depth && subtree_extension < self.rmq.tree[node_2].depth {
+        if subtree_extension < self.decomp.tree[node_1].depth && subtree_extension < self.decomp.tree[node_2].depth {
             let ordering = self.compare_ancestors(node_1, node_2, subtree_extension);
             return (subtree_extension, ordering);
         }
 
-        if subtree_extension < self.rmq.tree[node_1].depth || subtree_extension >= self.rmq.tree[node_2].depth {
+        if subtree_extension < self.decomp.tree[node_1].depth || subtree_extension >= self.decomp.tree[node_2].depth {
             // (subtree_extension < self.rmq.tree[node_1].depth and subtree_extension >= self.rmq.tree[node_2].depth)
             // or (subtree_extension >= self.rmq.tree[node_1].depth and subtree_extension >= self.rmq.tree[node_2].depth)
-            let jump_distance = if subtree_extension < self.rmq.tree[node_1].depth {
+            let jump_distance = if subtree_extension < self.decomp.tree[node_1].depth {
                 subtree_extension
             } else {
-                let loop_1_length = self.rmq.tree[node_1].depth + k - branch_identifier_1;
-                self.rmq.tree[node_1].depth - loop_1_length // depth_in_loop_1
+                let loop_1_length = self.decomp.tree[node_1].depth + k - branch_identifier_1;
+                self.decomp.tree[node_1].depth - loop_1_length // depth_in_loop_1
             };
             let node_1_jump = self.la_query(node_1, jump_distance);
             let (node_1, branch_identifier_1) = self.find_canonic_node_and_branch_identifier(node_1_jump);
@@ -359,18 +355,18 @@ impl LongestCommonExtension {
 
         // subtree_extension >= self.rmq.tree[node_1].depth and subtree_extension < self.rmq.tree[node_2].depth
 
-        let loop_1_length = self.rmq.tree[node_1].depth + k - branch_identifier_1;
-        let depth_in_loop_1 = self.rmq.tree[node_1].depth - loop_1_length;
+        let loop_1_length = self.decomp.tree[node_1].depth + k - branch_identifier_1;
+        let depth_in_loop_1 = self.decomp.tree[node_1].depth - loop_1_length;
 
-        debug_assert!(loop_1_length + depth_in_loop_1 == self.rmq.tree[node_1].depth);
-        debug_assert!(self.rmq.tree[node_1].depth < self.rmq.tree[node_2].depth);
+        debug_assert!(loop_1_length + depth_in_loop_1 == self.decomp.tree[node_1].depth);
+        debug_assert!(self.decomp.tree[node_1].depth < self.decomp.tree[node_2].depth);
 
         let sample_ancestor  = self.la_query(         node_2, depth_in_loop_1);
         let shifted_ancestor = self.la_query(sample_ancestor, loop_1_length);
         let shift_extension = self.rm_query(sample_ancestor, shifted_ancestor);
 
-        let total_subtree_extension = shift_extension + self.rmq.tree[node_1].depth;
-        if total_subtree_extension < self.rmq.tree[node_2].depth {
+        let total_subtree_extension = shift_extension + self.decomp.tree[node_1].depth;
+        if total_subtree_extension < self.decomp.tree[node_2].depth {
             // non-loop node === shifted ancestor
             let ordering = self.compare_ancestors(sample_ancestor, shifted_ancestor, shift_extension);
             return (total_subtree_extension, ordering);
@@ -405,24 +401,24 @@ impl LongestCommonExtension {
         debug_assert!(k < branch_identifier_1 && branch_identifier_1 < 2 * k);
         debug_assert!(k < branch_identifier_2 && branch_identifier_2 < 2 * k);
 
-        let mut loop_1_length   = self.rmq.tree[node_1].depth + k - branch_identifier_1;
-        let mut depth_in_loop_1 = self.rmq.tree[node_1].depth - loop_1_length;
-        let mut loop_2_length   = self.rmq.tree[node_2].depth + k - branch_identifier_2;
-        let mut depth_in_loop_2 = self.rmq.tree[node_2].depth - loop_2_length;
+        let mut loop_1_length   = self.decomp.tree[node_1].depth + k - branch_identifier_1;
+        let mut depth_in_loop_1 = self.decomp.tree[node_1].depth - loop_1_length;
+        let mut loop_2_length   = self.decomp.tree[node_2].depth + k - branch_identifier_2;
+        let mut depth_in_loop_2 = self.decomp.tree[node_2].depth - loop_2_length;
 
         let initial_extension = self.rm_query(node_1, node_2);
 
-        if initial_extension < self.rmq.tree[node_1].depth && initial_extension < self.rmq.tree[node_2].depth {
+        if initial_extension < self.decomp.tree[node_1].depth && initial_extension < self.decomp.tree[node_2].depth {
             let ordering = self.compare_ancestors(node_1, node_2, initial_extension);
             return (initial_extension, ordering);
         }
 
-        if initial_extension >= self.rmq.tree[node_1].depth && initial_extension >= self.rmq.tree[node_2].depth {
+        if initial_extension >= self.decomp.tree[node_1].depth && initial_extension >= self.decomp.tree[node_2].depth {
             return (k, std::cmp::Ordering::Equal);
         }
 
         let mut reverse = false;
-        if initial_extension >= self.rmq.tree[node_2].depth {
+        if initial_extension >= self.decomp.tree[node_2].depth {
             reverse = true;
             std::mem::swap(&mut node_1,              &mut node_2);
             std::mem::swap(&mut branch_identifier_1, &mut branch_identifier_2);
@@ -442,24 +438,24 @@ impl LongestCommonExtension {
             ordering = ordering.reverse();
         }
 
-        (shift_extension + self.rmq.tree[node_1].depth, ordering)
+        (shift_extension + self.decomp.tree[node_1].depth, ordering)
     }
 
     #[inline]
     fn la_query(&self, node: usize, climb: usize) -> usize {
-        self.laq.query(&self.rmq.tree, node, climb)
+        self.laq.query(&self.decomp.tree, node, climb)
     }
 
     #[inline]
     fn rm_query(&self, node_1: usize, node_2: usize) -> usize {
-        let name_1 = self.rmq.tree[node_1].name;
-        let name_2 = self.rmq.tree[node_2].name;
+        let name_1 = self.decomp.tree[node_1].name;
+        let name_2 = self.decomp.tree[node_2].name;
         if name_1 == name_2 {
-            return self.rmq.rmq.name_lengths()[name_1]
+            return self.decomp.rmq.name_lengths()[name_1]
         }
         let smaller_name = name_1.min(name_2);
         let bigger_name = name_1 + name_2 - smaller_name;
-        self.rmq.rmq.query(smaller_name + 1, bigger_name)
+        self.decomp.rmq.query(smaller_name + 1, bigger_name)
     }
 
     #[inline]
@@ -471,8 +467,8 @@ impl LongestCommonExtension {
     ) -> std::cmp::Ordering {
         let parent_1 = self.la_query(node_1, extension);
         let parent_2 = self.la_query(node_2, extension);
-        let parent_1_name = self.rmq.tree[parent_1].name;
-        let parent_2_name = self.rmq.tree[parent_2].name;
+        let parent_1_name = self.decomp.tree[parent_1].name;
+        let parent_2_name = self.decomp.tree[parent_2].name;
         // unsafe {
         //     LAST_RESULT = (parent_1, parent_2, parent_1_name, parent_2_name, extension)
         // }
@@ -481,59 +477,34 @@ impl LongestCommonExtension {
 
     #[inline]
     fn find_branch_identifier(&self, node: usize) -> usize {
-        let mut sbwt_index = self.rmq.tree[node].id;
-        if sbwt_index < self.offset {
-            self.rmq.sbwt_1_mapping.branch_identifier[sbwt_index]
-        } else {
-            sbwt_index -= self.offset;
-            self.rmq.sbwt_2_mapping.branch_identifier[sbwt_index]
-        }
+        let (colex_rank, origin) = self.decomp.mapping.id_to_colex_rank(self.decomp.tree[node].id);
+        self.decomp.mapping.branch_id(colex_rank, origin)
     }
 
     #[inline]
     fn find_canonic_node(&self, node: usize) -> usize {
-        let mut sbwt_index = self.rmq.tree[node].id;
-        if sbwt_index < self.offset {
-            self.rmq.sbwt_1_mapping.sbwt_to_tree[sbwt_index]
-        } else {
-            sbwt_index -= self.offset;
-            self.rmq.sbwt_2_mapping.sbwt_to_tree[sbwt_index]
-        }
+        self.decomp.mapping.id_to_canonic_node(self.decomp.tree[node].id)
     }
 
     #[inline]
     fn find_canonic_node_and_branch_identifier(&self, node: usize) -> (usize, usize) {
-        let mut sbwt_index = self.rmq.tree[node].id;
-        if sbwt_index < self.offset {
-            (
-                self.rmq.sbwt_1_mapping.sbwt_to_tree[sbwt_index],
-                self.rmq.sbwt_1_mapping.branch_identifier[sbwt_index]
-            )
-        } else {
-            sbwt_index -= self.offset;
-            (
-                self.rmq.sbwt_2_mapping.sbwt_to_tree[sbwt_index],
-                self.rmq.sbwt_2_mapping.branch_identifier[sbwt_index]
-            )
-        }
+        let id = self.decomp.tree[node].id;
+        let (colex_rank, origin) = self.decomp.mapping.id_to_colex_rank(id);
+        self.decomp.mapping.node_and_branch_id(colex_rank, origin)
     }
 
     pub fn is_dummy(
         &self,
-        index: usize,
+        colex_rank: usize,
         origin: usize,
     ) -> bool {
-        let mapping = if origin == 0 { &self.rmq.sbwt_1_mapping } else { &self.rmq.sbwt_2_mapping };
-        let branch_identifier = mapping.branch_identifier[index];
-        branch_identifier < self.k
+        self.decomp.mapping.branch_id(colex_rank, origin) < self.k
     }
 }
 
-pub fn test_lce_from_sbwts<SS: SubsetSeq>(sbwt_1: &SbwtIndex<SS>, sbwt_2: &SbwtIndex<SS>) {
-    let k = sbwt_1.k();
-    let sbwts = &[sbwt_1, sbwt_2];
-
-    let lce = LongestCommonExtension::new(sbwt_1, sbwt_2);
+pub fn test_lce_from_sbwts(sbwts: &[&SbwtIndexVariant]) {
+    let k = sbwts[0].k();
+    let lce = LongestCommonExtension::new(sbwts);
 
     log::info!("testing laq:");
     fn level_ancestor_query(tree: &[Node], mut node: usize, mut climb: usize) -> usize {
@@ -544,66 +515,67 @@ pub fn test_lce_from_sbwts<SS: SubsetSeq>(sbwt_1: &SbwtIndex<SS>, sbwt_2: &SbwtI
         node
     }
 
-    for (node_index, node) in lce.rmq.tree.iter().enumerate() {
+    for (node_index, node) in lce.decomp.tree.iter().enumerate() {
         // let max_depth = node.depth;
-        let max_depth = (2 * k).min(lce.rmq.tree[node_index].depth);
+        let max_depth = (2 * k).min(lce.decomp.tree[node_index].depth);
         for climb in 0..max_depth {
-            let invariant = level_ancestor_query(&lce.rmq.tree, node_index, climb);
-            let found     = lce.laq.query       (&lce.rmq.tree, node_index, climb);
+            let invariant = level_ancestor_query(&lce.decomp.tree, node_index, climb);
+            let found     = lce.laq.query       (&lce.decomp.tree, node_index, climb);
             assert_eq!(invariant, found, "node_index: {}; climb: {}", node_index, climb);
         }
     }
 
     log::info!("testing lce:");
-    let offset = sbwt_1.n_sets();
-    let index_and_origin = |index| if index < offset {
-        (index, 0)
-    } else {
-        (index - offset, 1)
-    };
+    let count = lce.decomp.mapping.sbwt_to_tree.len();
 
-    let count = offset + sbwt_2.n_sets();
-    let mut kmer_1_buf = Vec::<u8>::new();
-    let mut kmer_2_buf = Vec::<u8>::new();
-    let mut kmer_1_parent_buf = Vec::<u8>::new();
-    let mut kmer_2_parent_buf = Vec::<u8>::new();
+    let mut kmer_i_buf = Vec::<u8>::new();
+    let mut kmer_j_buf = Vec::<u8>::new();
+    let mut kmer_i_parent_buf = Vec::<u8>::new();
+    let mut kmer_j_parent_buf = Vec::<u8>::new();
+
+    let mut origin_i = 0;
     for i in 0..count {
-        let (index_1, origin_1) = index_and_origin(i);
+        if i >= lce.decomp.mapping.sbwt_offsets[origin_i + 1] {
+            origin_i += 1;
+        }
+        let index_i = i - lce.decomp.mapping.sbwt_offsets[origin_i];
 
-        kmer_1_buf.clear();
-        sbwts[origin_1].push_kmer_to_vec(index_1, &mut kmer_1_buf);
-        let kmer_1_str = str::from_utf8(&kmer_1_buf).unwrap();
+        kmer_i_buf.clear();
+        sbwts[origin_i].push_kmer_to_vec(index_i, &mut kmer_i_buf);
+        let kmer_i_str = str::from_utf8(&kmer_i_buf).unwrap();
+
+        let mut origin_j = 0;
         for j in 0..count {
+            if j >= lce.decomp.mapping.sbwt_offsets[origin_j + 1] {
+                origin_j += 1;
+            }
+            let index_j = j - lce.decomp.mapping.sbwt_offsets[origin_j];
+
             if j == i {
                 continue;
             }
-            let (index_2, origin_2) = index_and_origin(j);
 
-            kmer_2_buf.clear();
-            sbwts[origin_2].push_kmer_to_vec(index_2, &mut kmer_2_buf);
-            let kmer_2_str = str::from_utf8(&kmer_2_buf).unwrap();
+            kmer_j_buf.clear();
+            sbwts[origin_j].push_kmer_to_vec(index_j, &mut kmer_j_buf);
+            let kmer_j_str = str::from_utf8(&kmer_j_buf).unwrap();
 
-            let (extension, ordering) = lce.query(index_1, origin_1, index_2, origin_2);
+            let (extension, ordering) = lce.query(index_i, origin_i, index_j, origin_j);
             let mut true_extension = 0;
             for j in (0..k).rev() {
-                if kmer_1_buf[j] != kmer_2_buf[j] {
+                if kmer_i_buf[j] != kmer_j_buf[j] {
                     break;
                 }
                 true_extension += 1;
             }
             let correct = if ordering == std::cmp::Ordering::Equal {
-                kmer_1_buf == kmer_2_buf
+                kmer_i_buf == kmer_j_buf
             } else {
                 true_extension == extension &&
-                kmer_1_buf[k-extension..k] ==  kmer_2_buf[k-extension..k] &&
-                kmer_1_buf[k-extension-1].cmp(&kmer_2_buf[k-extension-1]) == ordering
+                kmer_i_buf[k-extension..k] ==  kmer_j_buf[k-extension..k] &&
+                kmer_i_buf[k-extension-1].cmp(&kmer_j_buf[k-extension-1]) == ordering
             };
-            let mapping_1 = if origin_1 == 0 { &lce.rmq.sbwt_1_mapping } else { &lce.rmq.sbwt_2_mapping };
-            let mapping_2 = if origin_2 == 0 { &lce.rmq.sbwt_1_mapping } else { &lce.rmq.sbwt_2_mapping };
-            let node_1 = mapping_1.sbwt_to_tree[index_1];
-            let node_2 = mapping_2.sbwt_to_tree[index_2];
-            let branch_identifier_1 = mapping_1.branch_identifier[index_1];
-            let branch_identifier_2 = mapping_2.branch_identifier[index_2];
+            let (node_i, branch_identifier_i) = lce.decomp.mapping.node_and_branch_id(index_i, origin_i);
+            let (node_j, branch_identifier_j) = lce.decomp.mapping.node_and_branch_id(index_j, origin_j);
             if !correct {
                 // unsafe {
                 //     let thing = LAST_TYPE;
@@ -611,28 +583,28 @@ pub fn test_lce_from_sbwts<SS: SubsetSeq>(sbwt_1: &SbwtIndex<SS>, sbwt_2: &SbwtI
                 //     let thing = LAST_RESULT;
                 //     println!("{:?}", thing);
                 // }
-                println!("index_1: {}, origin_1: {}, node_1: {}", index_1, origin_1, node_1);
-                println!("index_2: {}, origin_2: {}, node_2: {}", index_2, origin_2, node_2);
+                println!("index_i: {}, origin_i: {}, node_i: {}", index_i, origin_i, node_i);
+                println!("index_j: {}, origin_j: {}, node_j: {}", index_j, origin_j, node_j);
                 for climb in 1..=extension {
-                    kmer_1_parent_buf.clear();
-                    kmer_2_parent_buf.clear();
-                    let node_1_parent = lce.rmq.tree[lce.la_query(node_1, climb)].id;
-                    let node_2_parent = lce.rmq.tree[lce.la_query(node_2, climb)].id;
-                    let (node_1_rank, parent_origin_1) = index_and_origin(node_1_parent);
-                    let (node_2_rank, parent_origin_2) = index_and_origin(node_2_parent);
-                    sbwts[origin_1].push_kmer_to_vec(node_1_rank, &mut kmer_1_parent_buf);
-                    sbwts[origin_2].push_kmer_to_vec(node_2_rank, &mut kmer_2_parent_buf);
+                    kmer_i_parent_buf.clear();
+                    kmer_j_parent_buf.clear();
+                    let node_i_parent = lce.decomp.tree[lce.la_query(node_i, climb)].id;
+                    let node_j_parent = lce.decomp.tree[lce.la_query(node_j, climb)].id;
+                    let (node_i_rank, parent_origin_i) = lce.decomp.mapping.id_to_colex_rank(node_i_parent);
+                    let (node_j_rank, parent_origin_j) = lce.decomp.mapping.id_to_colex_rank(node_j_parent);
+                    sbwts[parent_origin_i].push_kmer_to_vec(node_i_rank, &mut kmer_i_parent_buf);
+                    sbwts[parent_origin_j].push_kmer_to_vec(node_j_rank, &mut kmer_j_parent_buf);
                     println!("{}: {} {}",
                         climb,
-                        str::from_utf8(&kmer_1_parent_buf).unwrap(),
-                        str::from_utf8(&kmer_2_parent_buf).unwrap(),
+                        str::from_utf8(&kmer_i_parent_buf).unwrap(),
+                        str::from_utf8(&kmer_j_parent_buf).unwrap(),
                     );
                 }
             }
             assert!(
                 correct,
-                "{} {} {} {:?} {} {}", kmer_1_str, kmer_2_str, extension, ordering,
-                branch_identifier_1, branch_identifier_2,
+                "{} {} {} {:?} {} {}", kmer_i_str, kmer_j_str, extension, ordering,
+                branch_identifier_i, branch_identifier_j,
             );
         }
     }
@@ -652,7 +624,12 @@ mod test {
             .build_select_support(true)
             .run();
 
-        test_lce_from_sbwts(&sbwt_1, &sbwt_2);
+        let sbwts = &[
+            &SbwtIndexVariant::SubsetMatrix(sbwt_1),
+            &SbwtIndexVariant::SubsetMatrix(sbwt_2),
+        ];
+
+        test_lce_from_sbwts(sbwts);
     }
 
     #[test]

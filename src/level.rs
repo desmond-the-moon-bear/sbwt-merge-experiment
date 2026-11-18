@@ -218,7 +218,11 @@ mod test {
         let (mut sbwt_2, _) = BitPackedKmerSortingMem::new_from_vecs(&seq_2, k)
             .build_select_support(true)
             .run();
-        let decomposition = crate::dctree::tree_decomposition_rmq(&sbwt_1, &sbwt_2);
+        let sbwts = &[
+            &SbwtIndexVariant::SubsetMatrix(sbwt_1),
+            &SbwtIndexVariant::SubsetMatrix(sbwt_2),
+        ];
+        let decomposition = crate::dctree::tree_decomposition_rmq(sbwts);
         test_level_ancestor(&decomposition.tree);
     }
 

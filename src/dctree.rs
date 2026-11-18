@@ -5,9 +5,9 @@ use crate::lce::LongestCommonExtension as LCE;
 use bitvec::prelude::*;
 use sbwt::BuildByLibsais;
 use sbwt::BitPackedKmerSortingMem;
-use sbwt::SbwtIndex;
 use sbwt::SubsetSeq;
 use sbwt::SubsetMatrix;
+use sbwt::sbwt_index_variant::SbwtIndexVariant;
 
 #[derive(Default, Debug)]
 pub struct Node {
@@ -19,6 +19,8 @@ pub struct Node {
 
 #[derive(Default, Debug)]
 pub struct MappingInformation {
+    pub max_sbwt_size: usize,
+    pub sbwt_offsets: Vec<usize>,
     pub sbwt_to_tree: Vec<usize>,
     // (type:1) [0..=k]      - branch originally connected to the root
     //                         or of a loop with length greater than k
@@ -29,61 +31,93 @@ pub struct MappingInformation {
 }
 
 impl MappingInformation {
-    fn new(length: usize) -> Self {
-        Self {
-            sbwt_to_tree: vec![0; length],
-            branch_identifier:  vec![0; length],
+    fn new(sbwts: &[&SbwtIndexVariant]) -> Self {
+        let mut sbwt_offsets = vec![0; sbwts.len() + 1];
+        let mut max_sbwt_size = 0;
+        let mut current_size = 0;
+        let mut total_size = 0;
+
+        for index in 0..sbwts.len() {
+            current_size  = sbwts[index].n_sets();
+            max_sbwt_size = max_sbwt_size.max(current_size);
+            sbwt_offsets[index + 1] = sbwt_offsets[index] + current_size;
+            total_size   += current_size;
         }
+
+        let sbwt_to_tree = vec![0_usize; total_size];
+        let branch_identifier = vec![0_usize; total_size];
+
+        Self {
+            max_sbwt_size,
+            sbwt_offsets,
+            sbwt_to_tree,
+            branch_identifier,
+        }
+    }
+
+    pub fn set(&mut self, colex_rank: usize, origin: usize, node: usize, branch_identifier: usize) {
+        let mapping_index = self.sbwt_offsets[origin] + colex_rank;
+        self.sbwt_to_tree[mapping_index] = node;
+        self.branch_identifier[mapping_index] = branch_identifier;
+
+    }
+
+    pub fn node(&self, colex_rank: usize, origin: usize) -> usize {
+        self.sbwt_to_tree[self.sbwt_offsets[origin] + colex_rank]
+    }
+
+    pub fn branch_id(&self, colex_rank: usize, origin: usize) -> usize {
+        self.branch_identifier[self.sbwt_offsets[origin] + colex_rank]
+    }
+
+    pub fn node_and_branch_id(&self, colex_rank: usize, origin: usize) -> (usize, usize) {
+        let mapping_index = self.sbwt_offsets[origin] + colex_rank;
+        (self.sbwt_to_tree[mapping_index], self.branch_identifier[mapping_index])
+    }
+
+    pub fn id_to_colex_rank(&self, id: usize) -> (usize, usize) {
+        let origin = id / self.max_sbwt_size;
+        (id - origin * self.max_sbwt_size, origin)
+    }
+
+    pub fn id_to_canonic_node(&self, id: usize) -> usize {
+        let origin = id / self.max_sbwt_size;
+        let colex_rank = id - origin * self.max_sbwt_size;
+        self.node(colex_rank, origin)
     }
 }
 
 pub struct TreeDecompositionRMQ {
-    pub sbwt_1_mapping: MappingInformation,
-    pub sbwt_2_mapping: MappingInformation,
+    pub mapping: MappingInformation,
     // The names in the tree should be the inverse permutation of the order vector. That is from
     // the (sbwt -> tree) mapping we can get the range for the range minimum queries.
     pub tree: Vec<Node>,
     pub rmq: RMQ,
 }
 
-pub fn tree_decomposition_rmq<SS1, SS2>(sbwt_1: &SbwtIndex<SS1>, sbwt_2: &SbwtIndex<SS2>) -> TreeDecompositionRMQ
-where
-    SS1: SubsetSeq,
-    SS2: SubsetSeq,
-{
-    assert_eq!(sbwt_1.k(), sbwt_2.k());
+pub fn tree_decomposition_rmq(sbwts: &[&SbwtIndexVariant]) -> TreeDecompositionRMQ {
+    assert!(sbwts.len() > 1);
+    let k = sbwts[0].k();
+    #[allow(clippy::needless_range_loop)]
+    for i in 1..sbwts.len() {
+        assert!(k == sbwts[i].k());
+    }
 
     // Merge the root of the two SBWT indices.
-    let sbwt_1_size = sbwt_1.n_sets();
-    let sbwt_2_size = sbwt_2.n_sets();
-    let initial_tree_capacity = sbwt_1_size + sbwt_2_size - 1;
-    let mut tree = Vec::<Node>::with_capacity(2 * initial_tree_capacity);
+    let mut mapping = MappingInformation::new(sbwts);
+    let initial_tree_capacity = 2 * mapping.sbwt_to_tree.len();
+    let mut tree = Vec::<Node>::with_capacity(initial_tree_capacity);
     tree.push(Node::default());
     tree[0].name = 1;
 
-    let mut sbwt_1_mapping = MappingInformation::new(sbwt_1_size);
-    let mut sbwt_2_mapping = MappingInformation::new(sbwt_2_size);
-    let mut sbwt_1_mapped = bitvec![0; sbwt_1_size];
-    let mut sbwt_2_mapped = bitvec![0; sbwt_2_size];
-
     let mut stack = Vec::<(usize, usize, usize)>::new();
     log::info!("emitting nodes:");
-    emit_tree_from_sbwt      (sbwt_1, &mut stack, &mut tree, &mut sbwt_1_mapping, &mut sbwt_1_mapped, 0);
-    emit_components_from_sbwt(sbwt_1, &mut stack, &mut tree, &mut sbwt_1_mapping, &mut sbwt_1_mapped, 0);
-    emit_tree_from_sbwt      (sbwt_2, &mut stack, &mut tree, &mut sbwt_2_mapping, &mut sbwt_2_mapped, sbwt_1_size);
-    emit_components_from_sbwt(sbwt_2, &mut stack, &mut tree, &mut sbwt_2_mapping, &mut sbwt_2_mapped, sbwt_1_size);
-
-    // for i in 0..sbwt_1_size {
-    //     assert!(sbwt_1_mapped[i]);
-    // }
-    // for i in 0..sbwt_2_size {
-    //     assert!(sbwt_2_mapped[i]);
-    // }
-    for i in 1..sbwt_1_size {
-        assert!(sbwt_1_mapping.branch_identifier[i] != 0, "1: {}", i);
-    }
-    for i in 1..sbwt_2_size {
-        assert!(sbwt_2_mapping.branch_identifier[i] != 0, "2: {}", i);
+    for (index, sbwt) in sbwts.iter().enumerate() {
+        let mut sbwt_size = sbwt.n_sets();
+        let mut mapped = bitvec![0; sbwt_size];
+        let offset = index * mapping.max_sbwt_size;
+        emit_tree_from_sbwt      (sbwt, index, &mut stack, &mut tree, &mut mapping, &mut mapped, offset);
+        emit_components_from_sbwt(sbwt, index, &mut stack, &mut tree, &mut mapping, &mut mapped, offset);
     }
 
     let tree_size = tree.len();
@@ -99,91 +133,70 @@ where
 
     log::info!("sorting the tree:");
     let mut bucket_buffer = vec![];
-    let rmq = sort_tree(&mut tree, &mut order, &mut alphabet_rmq, &mut bucket_buffer, 5, 1, sbwt_1.k());
-
-    // for (index, node) in tree.iter().enumerate() {
-    //     println!("{:3} <- {:3} : {}", node.parent, index, node.depth);
-    // }
-    //
-    // let lcp_array = rmq.values();
-    // let name_lengths_array = rmq.name_lengths();
-    // let mut kmer_buffer = vec![0_u8; sbwt_1.k()];
-    // for (index, &tree_index) in order.iter().enumerate() {
-    //     let node_index = tree[tree_index].id;
-    //     kmer_buffer.clear();
-    //     let lcp = lcp_array[index];
-    //     let name_length = name_lengths_array[index];
-    //     if node_index < sbwt_1_size {
-    //         sbwt_1.push_kmer_to_vec(node_index, &mut kmer_buffer);
-    //         let kmer = str::from_utf8(&kmer_buffer).unwrap();
-    //         println!("[1:{:05}] [{:3}] {} [{:3}]", node_index, name_length, kmer, lcp);
-    //     } else {
-    //         let node_index = node_index - sbwt_1_size;
-    //         sbwt_2.push_kmer_to_vec(node_index, &mut kmer_buffer);
-    //         let kmer = str::from_utf8(&kmer_buffer).unwrap();
-    //         println!("[2:{:05}] [{:3}] {} [{:3}]", node_index, name_length, kmer, lcp);
-    //     }
-    // }
+    let rmq = sort_tree(&mut tree, &mut order, &mut alphabet_rmq, &mut bucket_buffer, 5, 1, k);
 
     for i in 0..tree_size {
         tree[order[i]].name = i;
     }
 
     TreeDecompositionRMQ {
-        sbwt_1_mapping,
-        sbwt_2_mapping,
+        mapping,
         tree,
         rmq,
     }
 }
 
-fn inedge_name(sbwt_index: usize, c_array: &[usize]) -> usize {
-    for character_index in (0..c_array.len()).rev() {
-        if sbwt_index >= c_array[character_index] {
-            return character_index + 2;
+fn inedge_name(sbwt: &SbwtIndexVariant, colex_rank: usize) -> usize {
+    let inlabel = sbwt.inlabel(colex_rank);
+    if let Some(inlabel) = inlabel {
+        match inlabel {
+            b'A' => 2,
+            b'C' => 3,
+            b'G' => 4,
+            _    => 5,
         }
+    } else {
+        1
     }
-    1
 }
 
-fn emit_tree_from_sbwt<SS: SubsetSeq>(
-    sbwt: &SbwtIndex<SS>,
+fn emit_tree_from_sbwt(
+    sbwt: &SbwtIndexVariant,
+    origin: usize,
     stack: &mut Vec<(usize, usize, usize)>,
     tree: &mut Vec<Node>,
     mapping: &mut MappingInformation,
     mapped: &mut BitVec,
     offset: usize
 ) {
-    let c_array = sbwt.sbwt().get_C_array();
     let alphabet = sbwt.alphabet();
     let k = sbwt.k();
 
     mapped.set(0, true);
     stack.clear();
     stack.push((0, 0, 0));
-    while let Some((sbwt_index, tree_parent, length)) = stack.pop() {
+    while let Some((colex_rank, tree_parent, length)) = stack.pop() {
         let mut next_edge = tree_parent;
-        if !mapped[sbwt_index] {
+        if !mapped[colex_rank] {
             let index = tree.len();
             next_edge = 0;
             tree.push(Node {
-                id: sbwt_index + offset,
+                id: colex_rank + offset,
                 depth: 0,
                 parent: tree_parent,
-                name: inedge_name(sbwt_index, &c_array),
+                name: inedge_name(sbwt, colex_rank),
             });
-            mapped.set(sbwt_index, true);
-            mapping.sbwt_to_tree[sbwt_index] = index;
-            mapping.branch_identifier[sbwt_index] = length;
+            mapped.set(colex_rank, true);
+            mapping.set(colex_rank, origin, index, length);
         }
-        let tree_index = mapping.sbwt_to_tree[sbwt_index];
+        let tree_index = mapping.node(colex_rank, origin);
         while next_edge < alphabet.len() {
             let character = &[alphabet[next_edge]];
-            let option_range = sbwt.search_from(sbwt_index..sbwt_index + 1, character);
+            let option_range = sbwt.search_from(colex_rank..colex_rank + 1, character);
             next_edge += 1;
             if let Some(range) = option_range {
                 if next_edge < alphabet.len() {
-                    stack.push((sbwt_index, next_edge, length));
+                    stack.push((colex_rank, next_edge, length));
                 }
                 stack.push((range.start, tree_index, (length + 1).min(k))); 
                 break;
@@ -192,23 +205,23 @@ fn emit_tree_from_sbwt<SS: SubsetSeq>(
     }
 }
 
-fn emit_components_from_sbwt<SS: SubsetSeq>(
-    sbwt: &SbwtIndex<SS>,
+fn emit_components_from_sbwt(
+    sbwt: &SbwtIndexVariant,
+    origin: usize,
     stack: &mut Vec<(usize, usize, usize)>,
     tree: &mut Vec<Node>,
     mapping: &mut MappingInformation,
     mapped: &mut BitVec,
     offset: usize,
 ) {
-    let c_array = sbwt.sbwt().get_C_array();
     let alphabet = sbwt.alphabet();
     let k = sbwt.k();
     let sbwt_size = sbwt.n_sets();
 
     let mut explored = bitvec![0; sbwt_size];
 
-    for current_sbwt_index in 1..sbwt_size {
-        if mapped[current_sbwt_index] {
+    for current_colex_rank in 1..sbwt_size {
+        if mapped[current_colex_rank] {
             continue;
         }
 
@@ -216,16 +229,16 @@ fn emit_components_from_sbwt<SS: SubsetSeq>(
         let mut found_loop = false;
         stack.clear();
 
-        stack.push((current_sbwt_index, 0, 0));
+        stack.push((current_colex_rank, 0, 0));
 
-        while let Some((sbwt_index, mut next_edge, _)) = stack.pop() {
+        while let Some((colex_rank, mut next_edge, _)) = stack.pop() {
             if next_edge >= alphabet.len() {
                 continue;
             }
 
             next_child = 0;
             while next_edge < alphabet.len() {
-                let option_range = sbwt.search_from(sbwt_index..sbwt_index + 1, &[alphabet[next_edge]]);
+                let option_range = sbwt.search_from(colex_rank..colex_rank + 1, &[alphabet[next_edge]]);
                 next_edge += 1;
                 if let Some(range) = option_range && !explored[range.start] {
                     next_child = range.start;
@@ -234,8 +247,8 @@ fn emit_components_from_sbwt<SS: SubsetSeq>(
             }
 
             if next_child > 0 {
-                stack.push((sbwt_index, next_edge, 0));
-                if next_child == current_sbwt_index {
+                stack.push((colex_rank, next_edge, 0));
+                if next_child == current_colex_rank {
                     found_loop = true;
                     break;
                 }
@@ -244,7 +257,7 @@ fn emit_components_from_sbwt<SS: SubsetSeq>(
             }
         }
 
-        explored.set(current_sbwt_index, true);
+        explored.set(current_colex_rank, true);
 
         if !found_loop {
             assert!(stack.is_empty());
@@ -261,39 +274,37 @@ fn emit_components_from_sbwt<SS: SubsetSeq>(
         } else {
             0
         };
-        for &(sbwt_index, _, _) in stack.iter().skip(to_skip) {
+        for &(colex_rank, _, _) in stack.iter().skip(to_skip) {
             let tree_index = tree.len();
             tree.push(Node {
-                id: sbwt_index + offset,
+                id: colex_rank + offset,
                 depth: 0,
                 parent,
-                name: inedge_name(sbwt_index, &c_array),
+                name: inedge_name(sbwt, colex_rank),
             });
             parent = tree_index;
         }
 
         if loop_length >= k {
             emit_long_loop_branch(
-                sbwt,
-                &c_array,
+                sbwt, origin,
                 stack,
                 tree,
                 mapping,
                 mapped,
                 offset,
-                current_sbwt_index,
+                current_colex_rank,
                 parent,
             );
         } else {
             emit_short_loop_branches(
-                sbwt,
-                &c_array,
+                sbwt, origin,
                 stack,
                 tree,
                 mapping,
                 mapped,
                 offset,
-                current_sbwt_index,
+                current_colex_rank,
                 parent,
             );
         }
@@ -301,9 +312,8 @@ fn emit_components_from_sbwt<SS: SubsetSeq>(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn emit_long_loop_branch<SS: SubsetSeq>(
-    sbwt: &SbwtIndex<SS>,
-    c_array: &[usize],
+fn emit_long_loop_branch(
+    sbwt: &SbwtIndexVariant, origin: usize,
     stack: &mut Vec<(usize, usize, usize)>,
     tree: &mut Vec<Node>,
     mapping: &mut MappingInformation,
@@ -318,33 +328,32 @@ fn emit_long_loop_branch<SS: SubsetSeq>(
     // Explore the subtrees of the necklace:
     stack.clear();
     stack.push((current_sbwt_index, necklace_parent, 0));
-    while let Some((sbwt_index, tree_parent, _)) = stack.pop() {
+    while let Some((colex_rank, tree_parent, _)) = stack.pop() {
         let mut tree_index;
         let mut next_edge = tree_parent;
 
-        if mapped[sbwt_index] {
-            tree_index = mapping.sbwt_to_tree[sbwt_index];
+        if mapped[colex_rank] {
+            tree_index = mapping.node(colex_rank, origin);
         } else {
             tree_index = tree.len();
             next_edge = 0;
             tree.push(Node {
-                id: sbwt_index + offset,
+                id: colex_rank + offset,
                 depth: 0,
                 parent: tree_parent,
-                name: inedge_name(sbwt_index, c_array),
+                name: inedge_name(sbwt, colex_rank),
             });
-            mapped.set(sbwt_index, true);
-            mapping.sbwt_to_tree[sbwt_index] = tree_index;
-            mapping.branch_identifier[sbwt_index] = k;
+            mapped.set(colex_rank, true);
+            mapping.set(colex_rank, origin, tree_index, k);
         };
 
         while next_edge < alphabet.len() {
             let character = &[alphabet[next_edge]];
-            let option_range = sbwt.search_from(sbwt_index..sbwt_index + 1, character);
+            let option_range = sbwt.search_from(colex_rank..colex_rank + 1, character);
             next_edge += 1;
             if let Some(range) = option_range && range.start != current_sbwt_index {
                 if next_edge < alphabet.len() {
-                    stack.push((sbwt_index, next_edge, 0));
+                    stack.push((colex_rank, next_edge, 0));
                 }
                 stack.push((range.start, tree_index, 0)); 
                 break;
@@ -354,9 +363,8 @@ fn emit_long_loop_branch<SS: SubsetSeq>(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn emit_short_loop_branches<SS: SubsetSeq>(
-    sbwt: &SbwtIndex<SS>,
-    c_array: &[usize],
+fn emit_short_loop_branches(
+    sbwt: &SbwtIndexVariant, origin: usize,
     stack: &mut Vec<(usize, usize, usize)>,
     tree: &mut Vec<Node>,
     mapping: &mut MappingInformation,
@@ -374,21 +382,20 @@ fn emit_short_loop_branches<SS: SubsetSeq>(
 
     // Second instance of the necklace.
     let mut loop_branch_identifier = 0;
-    for &(sbwt_index, _, _) in stack.iter() {
-        mapped.set(sbwt_index, true);
+    for &(colex_rank, _, _) in stack.iter() {
+        mapped.set(colex_rank, true);
         let tree_index = tree.len();
-        if sbwt_index == 212 && offset > 0 {
+        if colex_rank == 212 && offset > 0 {
             println!("short loop unravel");
         }
         tree.push(Node {
-            id: sbwt_index + offset,
+            id: colex_rank + offset,
             depth: 0,
             parent: necklace_parent,
-            name: inedge_name(sbwt_index, c_array),
+            name: inedge_name(sbwt, colex_rank),
         });
         loop_branch_identifier += 1;
-        mapping.sbwt_to_tree[sbwt_index] = tree_index;
-        mapping.branch_identifier[sbwt_index] = k + loop_branch_identifier;
+        mapping.set(colex_rank, origin, tree_index, k + loop_branch_identifier);
         necklace_parent = tree_index;
     }
 
@@ -399,15 +406,15 @@ fn emit_short_loop_branches<SS: SubsetSeq>(
 
         stack.clear();
         stack.push((current_sbwt_index, 0, 0));
-        while let Some((sbwt_index, tree_parent, mut branch_identifier)) = stack.pop() {
+        while let Some((colex_rank, tree_parent, mut branch_identifier)) = stack.pop() {
             let mut tree_index;
             let mut next_edge = tree_parent;
 
-            debug_assert!(sbwt_index == current_sbwt_index || branch_identifier != 0);
+            debug_assert!(colex_rank == current_sbwt_index || branch_identifier != 0);
 
-            if mapped[sbwt_index] {
-                tree_index = mapping.sbwt_to_tree[sbwt_index];
-                if sbwt_index == current_sbwt_index {
+            if mapped[colex_rank] {
+                tree_index = mapping.node(colex_rank, origin);
+                if colex_rank == current_sbwt_index {
                     tree_index = 0;
                     branch_identifier = 2 * k + loop_node_index;
                 }
@@ -415,24 +422,22 @@ fn emit_short_loop_branches<SS: SubsetSeq>(
                 tree_index = tree.len();
                 next_edge = 0;
                 tree.push(Node {
-                    id: sbwt_index + offset,
+                    id: colex_rank + offset,
                     depth: 0,
                     parent: tree_parent,
-                    name: inedge_name(sbwt_index, c_array),
+                    name: inedge_name(sbwt, colex_rank),
                 });
-                mapped.set(sbwt_index, true);
-                mapping.sbwt_to_tree[sbwt_index] = tree_index;
-                mapping.branch_identifier[sbwt_index] = branch_identifier;
+                mapped.set(colex_rank, true);
+                mapping.set(colex_rank, origin, tree_index, branch_identifier);
             };
-
 
             while next_edge < alphabet.len() {
                 let character = &[alphabet[next_edge]];
-                let option_range = sbwt.search_from(sbwt_index..sbwt_index + 1, character);
+                let option_range = sbwt.search_from(colex_rank..colex_rank + 1, character);
                 next_edge += 1;
                 if let Some(range) = option_range && !mapped[range.start] {
                     if next_edge < alphabet.len() {
-                        stack.push((sbwt_index, next_edge, branch_identifier));
+                        stack.push((colex_rank, next_edge, branch_identifier));
                     }
                     debug_assert!(branch_identifier >= 2 * k);
                     stack.push((range.start, tree_index, branch_identifier)); 

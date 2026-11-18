@@ -38,6 +38,11 @@ fn merge_data_test() {
     sbwt_1.build_select();
     sbwt_2.build_select();
 
+    let sbwts = &[&sbwt_1, &sbwt_2];
+
+    log::info!("calculated merge:");
+    let (lce, calculated_merge) = merge::construct_merge_plan(sbwts);
+
     let sbwt_1 = match sbwt_1 {
         SbwtIndexVariant::SubsetMatrix(sbwt_index) => sbwt_index,
         SbwtIndexVariant::SubsetCorrectionSets(sbwt_index) => unreachable!(),
@@ -46,75 +51,12 @@ fn merge_data_test() {
         SbwtIndexVariant::SubsetMatrix(sbwt_index) => sbwt_index,
         SbwtIndexVariant::SubsetCorrectionSets(sbwt_index) => unreachable!(),
     };
-
     log::info!("canonic merge:");
     let canonic_merge = sbwt::MergeInterleaving::new(&sbwt_1, &sbwt_2, false, 7);
-    log::info!("calculated merge:");
-    let (lce, calculated_merge) = merge::construct_merge_plan(&sbwt_1, &sbwt_2);
-    println!("{} {}", canonic_merge.s1.len(), calculated_merge.s1.len());
-    println!("{} {}", canonic_merge.s2.len(), calculated_merge.s2.len());
-    println!("{} {}", canonic_merge.is_dummy.len(), calculated_merge.is_dummy.len());
-    println!("{} {}", canonic_merge.is_leader.len(), calculated_merge.is_leader.len());
+
     println!("{}", canonic_merge.s1 == calculated_merge.s1);
     println!("{}", canonic_merge.s2 == calculated_merge.s2);
+    println!("{}", canonic_merge.is_dummy == calculated_merge.is_dummy);
     println!("{}", canonic_merge.is_leader == calculated_merge.is_leader);
-}
-
-fn mini_test() {
-    let k = 7;
-    let seq_1 = seqs![
-        b"AACCCCC",
-        b"AAGGGGG",
-        b"TTCCCCG",
-        b"GCGCGCGCG",
-        b"GCGCGCA",
-        b"GCGCGCT",
-    ];
-    let (mut sbwt_1, _) = BitPackedKmerSortingMem::new_from_vecs(&seq_1, k)
-        .build_select_support(true)
-        .run();
-
-    let seq_2 = seqs![
-        b"AACCCCC",
-        b"CCGGGGG",
-        b"CCTTTTT",
-    ];
-    let (mut sbwt_2, _) = BitPackedKmerSortingMem::new_from_vecs(&seq_2, k)
-        .build_select_support(true)
-        .run();
-
-    let sbwts = &[&sbwt_1, &sbwt_2];
-
-    let lce = LCE::new(&sbwt_1, &sbwt_2);
-
-    let offset = sbwt_1.n_sets();
-    let count = offset + sbwt_2.n_sets();
-    for i in 1..count {
-        let (index_1, origin_1) = if i < offset {
-            (i, 0)
-        } else {
-            (i - offset, 1)
-        };
-
-        let kmer_1 = sbwts[origin_1].access_kmer(index_1);
-        let kmer_1_str = str::from_utf8(&kmer_1).unwrap();
-        for j in i + 1..count {
-            let (index_2, origin_2) = if j < offset {
-                (j, 0)
-            } else {
-                (j - offset, 1)
-            };
-
-            let kmer_2 = sbwts[origin_2].access_kmer(index_2);
-            let kmer_2_str = str::from_utf8(&kmer_2).unwrap();
-
-            let (extension, ordering) = lce.query(index_1, origin_1, index_2, origin_2);
-            println!("{} {} {}; lce: {}", kmer_1_str, match ordering {
-                std::cmp::Ordering::Less =>    "is before  ",
-                std::cmp::Ordering::Equal =>   "is equal to",
-                std::cmp::Ordering::Greater => "is after   ",
-            }, kmer_2_str, extension);
-        }
-    }
 }
 

@@ -6,17 +6,14 @@ use sbwt::MergeInterleaving;
 
 use bitvec::prelude::*;
 
-pub fn construct_merge_plan<SS1, SS2>(sbwt_1: &SbwtIndex<SS1>, sbwt_2: &SbwtIndex<SS2>) -> (LCE, MergeInterleaving)
-where
-    SS1: SubsetSeq,
-    SS2: SubsetSeq,
+pub fn construct_merge_plan(sbwts: &[&SbwtIndexVariant]) -> (LCE, MergeInterleaving)
 {
-    let k = sbwt_1.k();
-    let lce = LCE::new(sbwt_1, sbwt_2);
+    let k = sbwts[0].k();
+    let lce = LCE::new(sbwts);
 
     log::info!("merging:");
-    let sbwt_1_size = sbwt_1.n_sets();
-    let sbwt_2_size = sbwt_2.n_sets();
+    let sbwt_1_size = sbwts[0].n_sets();
+    let sbwt_2_size = sbwts[1].n_sets();
     let capacity = sbwt_1_size + sbwt_2_size;
 
     let progress_step = capacity / 10;
