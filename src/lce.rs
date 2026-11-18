@@ -615,21 +615,18 @@ mod test {
     use super::*;
     use super::LongestCommonExtension as LCE;
 
-    fn test_lce_from_seqs(k: usize, seq_1: Vec<Vec<u8>>, seq_2: Vec<Vec<u8>>) 
+    fn test_lce_from_seqs(k: usize, seqs: Vec<Vec<Vec<u8>>>) 
     {
-        let (mut sbwt_1, _) = BitPackedKmerSortingMem::new_from_vecs(&seq_1, k)
-            .build_select_support(true)
-            .run();
-        let (mut sbwt_2, _) = BitPackedKmerSortingMem::new_from_vecs(&seq_2, k)
-            .build_select_support(true)
-            .run();
+        let mut sbwts: Vec<SbwtIndexVariant> = vec![];
+        for seq in seqs {
+            let (mut sbwt, _) = BitPackedKmerSortingMem::new_from_vecs(&seq, k)
+                .build_select_support(true)
+                .run();
+            sbwts.push(SbwtIndexVariant::SubsetMatrix(sbwt));
+        }
 
-        let sbwts = &[
-            &SbwtIndexVariant::SubsetMatrix(sbwt_1),
-            &SbwtIndexVariant::SubsetMatrix(sbwt_2),
-        ];
-
-        test_lce_from_sbwts(sbwts);
+        let sbwts_ref = sbwts.iter().collect::<Vec<_>>();
+        test_lce_from_sbwts(&sbwts_ref);
     }
 
     #[test]
@@ -651,7 +648,7 @@ mod test {
             b"ACACCAGGGAGGGG",
             b"ACAGGAGGGAGGGG",
         ];
-        test_lce_from_seqs(k, seq_1, seq_2);
+        test_lce_from_seqs(k, vec![seq_1, seq_2]);
     }
 
     #[test]
@@ -665,7 +662,7 @@ mod test {
             b"CGCGCGCGCG",
             b"CGCGCATAT",
         ];
-        test_lce_from_seqs(k, seq_1, seq_2);
+        test_lce_from_seqs(k, vec![seq_1, seq_2]);
     }
 
     #[test]
@@ -677,7 +674,7 @@ mod test {
         let seq_2 = seqs![
             b"CGCGCGCGCGATATAT",
         ];
-        test_lce_from_seqs(k, seq_1, seq_2);
+        test_lce_from_seqs(k, vec![seq_1, seq_2]);
     }
 
     #[test]
@@ -689,7 +686,7 @@ mod test {
         let seq_2 = seqs![
             b"ATATATAT",
         ];
-        test_lce_from_seqs(k, seq_1, seq_2);
+        test_lce_from_seqs(k, vec![seq_1, seq_2]);
     }
 
     #[test]
@@ -701,7 +698,7 @@ mod test {
         let seq_2 = seqs![
             b"CTACTACTACTACTA",
         ];
-        test_lce_from_seqs(k, seq_1, seq_2);
+        test_lce_from_seqs(k, vec![seq_1, seq_2]);
     }
 
     #[test]
@@ -713,7 +710,7 @@ mod test {
         let seq_2 = seqs![
             b"CATCATCATCATCAT",
         ];
-        test_lce_from_seqs(k, seq_1, seq_2);
+        test_lce_from_seqs(k, vec![seq_1, seq_2]);
     }
 
     #[test]
@@ -727,6 +724,37 @@ mod test {
             b"ACACACACACACAC",
             b"CGTGTCGTGTCGTGTCGTGT"
         ];
-        test_lce_from_seqs(k, seq_1, seq_2);
+        test_lce_from_seqs(k, vec![seq_1, seq_2]);
+    }
+
+    #[test]
+    fn lce_8() {
+        let k = 8;
+        test_lce_from_seqs(k, vec![
+            seqs![
+                b"GACACGACACGACACGACAC",
+                b"GTGTGTGTGTGTGT"
+            ],
+            seqs![
+                b"ACACACACACACAC",
+                b"CGTGTCGTGTCGTGTCGTGT"
+            ],
+            seqs![
+                b"AACCCCC",
+                b"AAGGGGG",
+                b"TTCCCCG",
+                b"GCGCGCGCG",
+                b"GCGCGCA",
+                b"GCGCGCT",
+            ],
+            seqs![
+                b"AACCCCC",
+                b"CCGGGGG",
+                b"CCTTTTT",
+                b"ACACCACCCACCCC",
+                b"ACACCAGGGAGGGG",
+                b"ACAGGAGGGAGGGG",
+            ],
+        ]);
     }
 }
