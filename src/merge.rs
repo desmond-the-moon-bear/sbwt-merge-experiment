@@ -6,7 +6,7 @@ use sbwt::MergeInterleaving;
 
 use bitvec::prelude::*;
 
-pub fn construct_merge_plan<SS1, SS2>(sbwt_1: &SbwtIndex<SS1>, sbwt_2: &SbwtIndex<SS2>) -> MergeInterleaving
+pub fn construct_merge_plan<SS1, SS2>(sbwt_1: &SbwtIndex<SS1>, sbwt_2: &SbwtIndex<SS2>) -> (LCE, MergeInterleaving)
 where
     SS1: SubsetSeq,
     SS2: SubsetSeq,
@@ -115,6 +115,6 @@ where
         }
     }
 
-    MergeInterleaving { s1, s2, is_dummy, is_leader }
+    (lce, MergeInterleaving { s1, s2, is_dummy, is_leader })
 }
 

@@ -160,12 +160,9 @@ fn emit_tree_from_sbwt<SS: SubsetSeq>(
 
     mapped.set(0, true);
     stack.clear();
-    stack.push((0, 0, 1));
+    stack.push((0, 0, 0));
     while let Some((sbwt_index, tree_parent, length)) = stack.pop() {
         let mut next_edge = tree_parent;
-        if sbwt_index == 212 && offset > 0 {
-            println!("tree of 11 type");
-        }
         if !mapped[sbwt_index] {
             let index = tree.len();
             next_edge = 0;
