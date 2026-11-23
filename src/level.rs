@@ -31,7 +31,8 @@ impl LevelAncestorSupport {
         let mut euler_index: i64 = 0;
         #[inline(always)]
         fn push_jump_pointers(jump_pointers: &mut Vec<(usize, usize)>, stack: &[usize], euler_index: i64) {
-            let largest_power_dividing = euler_index.isolate_lowest_one();
+            // let largest_power_dividing = euler_index.isolate_lowest_one();
+            let largest_power_dividing = euler_index ^ (euler_index & (euler_index - 1));
             let index_in_stack_1 = 0.max(stack.len() as i64 - 1 - 2 * largest_power_dividing);
             let index_in_stack_2 = 0.max(stack.len() as i64 - 1 - 4 * largest_power_dividing);
             let jump_1 = stack[index_in_stack_1 as usize];

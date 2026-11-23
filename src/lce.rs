@@ -502,6 +502,80 @@ impl LongestCommonExtension {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
+pub fn test_single_lce(
+    lce: &LongestCommonExtension,
+    sbwts: &[&SbwtIndexVariant],
+    kmer_i_buf: &mut Vec<u8>,
+    kmer_j_buf: &mut Vec<u8>,
+    kmer_i_parent_buf: &mut Vec<u8>,
+    kmer_j_parent_buf: &mut Vec<u8>,
+    index_i: usize,
+    origin_i: usize,
+    index_j: usize,
+    origin_j: usize
+) {   
+    kmer_i_buf.clear();
+    kmer_j_buf.clear();
+    kmer_i_parent_buf.clear();
+    kmer_j_parent_buf.clear();
+
+    sbwts[origin_i].push_kmer_to_vec(index_i, kmer_i_buf);
+    sbwts[origin_j].push_kmer_to_vec(index_j, kmer_j_buf);
+
+    let k = lce.k;
+    let (extension, ordering) = lce.query(index_i, origin_i, index_j, origin_j);
+    let mut true_extension = 0;
+    for j in (0..k).rev() {
+        if kmer_i_buf[j] != kmer_j_buf[j] {
+            break;
+        }
+        true_extension += 1;
+    }
+    let correct = if ordering == std::cmp::Ordering::Equal {
+        kmer_i_buf == kmer_j_buf
+    } else {
+        true_extension == extension &&
+        kmer_i_buf[k-extension..k] ==  kmer_j_buf[k-extension..k] &&
+        kmer_i_buf[k-extension-1].cmp(&kmer_j_buf[k-extension-1]) == ordering
+    };
+    let (node_i, branch_identifier_i) = lce.decomp.mapping.node_and_branch_id(index_i, origin_i);
+    let (node_j, branch_identifier_j) = lce.decomp.mapping.node_and_branch_id(index_j, origin_j);
+    if !correct {
+        // unsafe {
+        //     let thing = LAST_TYPE;
+        //     println!("{}", thing);
+        //     let thing = LAST_RESULT;
+        //     println!("{:?}", thing);
+        // }
+        println!("index_i: {}, origin_i: {}, node_i: {}", index_i, origin_i, node_i);
+        println!("index_j: {}, origin_j: {}, node_j: {}", index_j, origin_j, node_j);
+        for climb in 1..=extension {
+            kmer_i_parent_buf.clear();
+            kmer_j_parent_buf.clear();
+            let node_i_parent = lce.decomp.tree[lce.la_query(node_i, climb)].id;
+            let node_j_parent = lce.decomp.tree[lce.la_query(node_j, climb)].id;
+            let (node_i_rank, parent_origin_i) = lce.decomp.mapping.id_to_colex_rank(node_i_parent);
+            let (node_j_rank, parent_origin_j) = lce.decomp.mapping.id_to_colex_rank(node_j_parent);
+            sbwts[parent_origin_i].push_kmer_to_vec(node_i_rank, kmer_i_parent_buf);
+            sbwts[parent_origin_j].push_kmer_to_vec(node_j_rank, kmer_j_parent_buf);
+            println!("{}: {} {}",
+                climb,
+                str::from_utf8(kmer_i_parent_buf).unwrap(),
+                str::from_utf8(kmer_j_parent_buf).unwrap(),
+            );
+        }
+    }
+    assert!(
+        correct,
+        "{} {} {} {:?} {} {}",
+        str::from_utf8(kmer_i_buf).unwrap(),
+        str::from_utf8(kmer_j_buf).unwrap(),
+        extension, ordering,
+        branch_identifier_i, branch_identifier_j,
+    );
+}
+
 pub fn test_lce_from_sbwts(sbwts: &[&SbwtIndexVariant]) {
     let k = sbwts[0].k();
     let lce = LongestCommonExtension::new(sbwts);
@@ -539,72 +613,26 @@ pub fn test_lce_from_sbwts(sbwts: &[&SbwtIndexVariant]) {
             origin_i += 1;
         }
         let index_i = i - lce.decomp.mapping.sbwt_offsets[origin_i];
-
-        kmer_i_buf.clear();
-        sbwts[origin_i].push_kmer_to_vec(index_i, &mut kmer_i_buf);
-        let kmer_i_str = str::from_utf8(&kmer_i_buf).unwrap();
-
         let mut origin_j = 0;
         for j in 0..count {
             if j >= lce.decomp.mapping.sbwt_offsets[origin_j + 1] {
                 origin_j += 1;
             }
             let index_j = j - lce.decomp.mapping.sbwt_offsets[origin_j];
-
             if j == i {
                 continue;
             }
-
-            kmer_j_buf.clear();
-            sbwts[origin_j].push_kmer_to_vec(index_j, &mut kmer_j_buf);
-            let kmer_j_str = str::from_utf8(&kmer_j_buf).unwrap();
-
-            let (extension, ordering) = lce.query(index_i, origin_i, index_j, origin_j);
-            let mut true_extension = 0;
-            for j in (0..k).rev() {
-                if kmer_i_buf[j] != kmer_j_buf[j] {
-                    break;
-                }
-                true_extension += 1;
-            }
-            let correct = if ordering == std::cmp::Ordering::Equal {
-                kmer_i_buf == kmer_j_buf
-            } else {
-                true_extension == extension &&
-                kmer_i_buf[k-extension..k] ==  kmer_j_buf[k-extension..k] &&
-                kmer_i_buf[k-extension-1].cmp(&kmer_j_buf[k-extension-1]) == ordering
-            };
-            let (node_i, branch_identifier_i) = lce.decomp.mapping.node_and_branch_id(index_i, origin_i);
-            let (node_j, branch_identifier_j) = lce.decomp.mapping.node_and_branch_id(index_j, origin_j);
-            if !correct {
-                // unsafe {
-                //     let thing = LAST_TYPE;
-                //     println!("{}", thing);
-                //     let thing = LAST_RESULT;
-                //     println!("{:?}", thing);
-                // }
-                println!("index_i: {}, origin_i: {}, node_i: {}", index_i, origin_i, node_i);
-                println!("index_j: {}, origin_j: {}, node_j: {}", index_j, origin_j, node_j);
-                for climb in 1..=extension {
-                    kmer_i_parent_buf.clear();
-                    kmer_j_parent_buf.clear();
-                    let node_i_parent = lce.decomp.tree[lce.la_query(node_i, climb)].id;
-                    let node_j_parent = lce.decomp.tree[lce.la_query(node_j, climb)].id;
-                    let (node_i_rank, parent_origin_i) = lce.decomp.mapping.id_to_colex_rank(node_i_parent);
-                    let (node_j_rank, parent_origin_j) = lce.decomp.mapping.id_to_colex_rank(node_j_parent);
-                    sbwts[parent_origin_i].push_kmer_to_vec(node_i_rank, &mut kmer_i_parent_buf);
-                    sbwts[parent_origin_j].push_kmer_to_vec(node_j_rank, &mut kmer_j_parent_buf);
-                    println!("{}: {} {}",
-                        climb,
-                        str::from_utf8(&kmer_i_parent_buf).unwrap(),
-                        str::from_utf8(&kmer_j_parent_buf).unwrap(),
-                    );
-                }
-            }
-            assert!(
-                correct,
-                "{} {} {} {:?} {} {}", kmer_i_str, kmer_j_str, extension, ordering,
-                branch_identifier_i, branch_identifier_j,
+            test_single_lce(
+                &lce,
+                sbwts,
+                &mut kmer_i_buf,
+                &mut kmer_j_buf,
+                &mut kmer_i_parent_buf,
+                &mut kmer_j_parent_buf,
+                index_i,
+                origin_i,
+                index_j,
+                origin_j
             );
         }
     }
