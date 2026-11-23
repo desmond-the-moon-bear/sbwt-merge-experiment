@@ -51,7 +51,12 @@ impl LongestCommonExtension {
         let node_2 = self.decomp.mapping.node(colex_rank_2, origin_2);
         let branch_identifier_1 = self.decomp.mapping.branch_id(colex_rank_1, origin_1);
         let branch_identifier_2 = self.decomp.mapping.branch_id(colex_rank_2, origin_2);
-        self.query_nodes(node_1, branch_identifier_1, node_2, branch_identifier_2)
+        let (extension, ordering) = self.query_nodes(node_1, branch_identifier_1, node_2, branch_identifier_2);
+        if extension >= self.k {
+            (self.k, std::cmp::Ordering::Equal)
+        } else {
+            (extension, ordering)
+        }
     }
 
     fn query_nodes(
