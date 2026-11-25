@@ -40,7 +40,7 @@ fn test_merge_lces() {
     sbwt_2.build_select();
     let sbwts = &[&sbwt_1, &sbwt_2];
     log::info!("calculated merge:");
-    let (lce, calculated_merge) = merge::test_merge_plan(sbwts);
+    let (lce, calculated_merge) = merge::test_merge_plan(7, sbwts);
 }
 
 fn merge_plan_comparison() {
@@ -52,7 +52,7 @@ fn merge_plan_comparison() {
     let sbwts = &[&sbwt_1, &sbwt_2];
 
     log::info!("calculated merge:");
-    let (lce, calculated_merge) = merge::construct_merge_plan(sbwts);
+    let (lce, calculated_merge) = merge::construct_merge_plan(7, sbwts);
 
     print_memusage("after calculated merge");
 

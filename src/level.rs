@@ -223,8 +223,13 @@ mod test {
             &SbwtIndexVariant::SubsetMatrix(sbwt_1),
             &SbwtIndexVariant::SubsetMatrix(sbwt_2),
         ];
-        let decomposition = crate::dctree::tree_decomposition_rmq(sbwts);
-        test_level_ancestor(&decomposition.tree);
+        let tp = rayon::ThreadPoolBuilder::new().num_threads(2).build().unwrap();
+        tp.scope(|s| {
+            s.spawn(|_| {
+                let decomposition = crate::dctree::TreeDecompositionRMQ::new(1, sbwts);
+                test_level_ancestor(&decomposition.tree);
+            });
+        });
     }
 
     fn node(parent: usize) -> Node {

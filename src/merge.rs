@@ -7,9 +7,10 @@ use sbwt::MergeInterleaving;
 
 use bitvec::prelude::*;
 
-pub fn construct_merge_plan(sbwts: &[&SbwtIndexVariant]) -> (LCE, MergeInterleaving) {
+pub fn construct_merge_plan(threads: usize, sbwts: &[&SbwtIndexVariant]) -> (LCE, MergeInterleaving) {
     let k = sbwts[0].k();
-    let lce = LCE::new(sbwts);
+    // let lce = LCE::new(sbwts, thread_count);
+    let lce = LCE::new_with_pool(threads, sbwts);
 
     log::info!("merging:");
     let sbwt_1_size = sbwts[0].n_sets();
@@ -115,9 +116,10 @@ pub fn construct_merge_plan(sbwts: &[&SbwtIndexVariant]) -> (LCE, MergeInterleav
     (lce, MergeInterleaving { s1, s2, is_dummy, is_leader })
 }
 
-pub fn test_merge_plan(sbwts: &[&SbwtIndexVariant]) -> (LCE, MergeInterleaving) {
+pub fn test_merge_plan(threads: usize, sbwts: &[&SbwtIndexVariant]) -> (LCE, MergeInterleaving) {
     let k = sbwts[0].k();
-    let lce = LCE::new(sbwts);
+    // let lce = LCE::new(sbwts, thread_count);
+    let lce = LCE::new_with_pool(threads, sbwts);
 
     log::info!("merging:");
     let sbwt_1_size = sbwts[0].n_sets();

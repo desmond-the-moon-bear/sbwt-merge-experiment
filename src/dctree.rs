@@ -1,3 +1,5 @@
+use std::sync::atomic::{AtomicUsize, Ordering};
+
 use crate::rmq::RangeMinimumQuery as RMQ;
 use crate::level::LevelAncestorSupport as LAQ;
 use crate::lce::LongestCommonExtension as LCE;
@@ -59,7 +61,6 @@ impl MappingInformation {
         let mapping_index = self.sbwt_offsets[origin] + colex_rank;
         self.sbwt_to_tree[mapping_index] = node;
         self.branch_identifier[mapping_index] = branch_identifier;
-
     }
 
     pub fn node(&self, colex_rank: usize, origin: usize) -> usize {
@@ -95,58 +96,71 @@ pub struct TreeDecompositionRMQ {
     pub rmq: RMQ,
 }
 
-pub fn tree_decomposition_rmq(sbwts: &[&SbwtIndexVariant]) -> TreeDecompositionRMQ {
-    assert!(sbwts.len() > 1);
-    let k = sbwts[0].k();
-    #[allow(clippy::needless_range_loop)]
-    for i in 1..sbwts.len() {
-        assert!(k == sbwts[i].k());
+impl TreeDecompositionRMQ {
+    pub fn new_with_pool(threads: usize, sbwts: &[&SbwtIndexVariant]) -> Self {
+        let tp = rayon::ThreadPoolBuilder::new().num_threads(threads).build().unwrap();
+        let mut op: Option<Self> = None;
+        tp.scope(|s| {
+            s.spawn(|_| {
+                op = Some(Self::new(threads, sbwts));
+            });
+        });
+        op.unwrap()
     }
 
-    // Merge the root of the two SBWT indices.
-    let mut mapping = MappingInformation::new(sbwts);
-    let initial_tree_capacity = 2 * mapping.sbwt_to_tree.len();
-    let mut tree = Vec::<Node>::with_capacity(initial_tree_capacity);
-    tree.push(Node::default());
-    tree[0].name = 1;
+    pub fn new(threads: usize, sbwts: &[&SbwtIndexVariant]) -> Self {
+        assert!(sbwts.len() > 1);
+        let k = sbwts[0].k();
+        #[allow(clippy::needless_range_loop)]
+        for i in 1..sbwts.len() {
+            assert!(k == sbwts[i].k());
+        }
 
-    let mut stack = Vec::<(usize, usize, usize)>::new();
-    log::info!("emitting nodes:");
-    for (index, sbwt) in sbwts.iter().enumerate() {
-        let mut sbwt_size = sbwt.n_sets();
-        let mut mapped = bitvec![0; sbwt_size];
-        let offset = index * mapping.max_sbwt_size;
-        emit_tree_from_sbwt      (sbwt, index, &mut stack, &mut tree, &mut mapping, &mut mapped, offset);
-        emit_components_from_sbwt(sbwt, index, &mut stack, &mut tree, &mut mapping, &mut mapped, offset);
-    }
+        // Merge the root of the two SBWT indices.
+        let mut mapping = MappingInformation::new(sbwts);
+        let initial_tree_capacity = 2 * mapping.sbwt_to_tree.len();
+        let mut tree = Vec::<Node>::with_capacity(initial_tree_capacity);
+        tree.push(Node::default());
+        tree[0].name = 1;
 
-    crate::print_memusage("after_decomp < td_rmq");
+        let mut stack = Vec::<(usize, usize, usize)>::new();
+        log::info!("emitting nodes:");
+        for (index, sbwt) in sbwts.iter().enumerate() {
+            let mut sbwt_size = sbwt.n_sets();
+            let mut mapped = bitvec![0; sbwt_size];
+            let offset = index * mapping.max_sbwt_size;
+            emit_tree_from_sbwt      (sbwt, index, &mut stack, &mut tree, &mut mapping, &mut mapped, offset);
+            emit_components_from_sbwt(sbwt, index, &mut stack, &mut tree, &mut mapping, &mut mapped, offset);
+        }
 
-    let tree_size = tree.len();
+        crate::print_memusage("after_decomp < td_rmq");
 
-    let mut order = vec![0_usize; tree_size];
+        let tree_size = tree.len();
 
-    let mut alphabet_lcp          = Vec::with_capacity(tree_size);
-    let mut alphabet_name_lengths = Vec::with_capacity(tree_size);
-    alphabet_lcp         .extend_from_slice(&[0; 5]);
-    alphabet_name_lengths.push(0);
-    alphabet_name_lengths.extend_from_slice(&[1; 4]);
-    let mut alphabet_rmq = RMQ::new(alphabet_name_lengths, alphabet_lcp);
+        let mut order = vec![0_usize; tree_size];
 
-    log::info!("sorting the tree:");
-    let mut bucket_buffer = vec![];
-    let rmq = sort_tree(&mut tree, &mut order, &mut alphabet_rmq, &mut bucket_buffer, 5, 1, k);
+        let mut alphabet_lcp          = Vec::with_capacity(tree_size);
+        let mut alphabet_name_lengths = Vec::with_capacity(tree_size);
+        alphabet_lcp         .extend_from_slice(&[0; 5]);
+        alphabet_name_lengths.push(0);
+        alphabet_name_lengths.extend_from_slice(&[1; 4]);
+        let mut alphabet_rmq = RMQ::new(alphabet_name_lengths, alphabet_lcp);
 
-    crate::print_memusage("after_sort < td_rmq");
+        log::info!("sorting the tree:");
+        let mut bucket_buffer = vec![];
+        let rmq = sort_tree(threads, &mut tree, &mut order, &mut alphabet_rmq, &mut bucket_buffer, 5, 1, k);
 
-    for i in 0..tree_size {
-        tree[order[i]].name = i;
-    }
+        crate::print_memusage("after_sort < td_rmq");
 
-    TreeDecompositionRMQ {
-        mapping,
-        tree,
-        rmq,
+        for i in 0..tree_size {
+            tree[order[i]].name = i;
+        }
+
+        Self {
+            mapping,
+            tree,
+            rmq,
+        }
     }
 }
 
@@ -389,9 +403,6 @@ fn emit_short_loop_branches(
     for &(colex_rank, _, _) in stack.iter() {
         mapped.set(colex_rank, true);
         let tree_index = tree.len();
-        if colex_rank == 212 && offset > 0 {
-            println!("short loop unravel");
-        }
         tree.push(Node {
             id: colex_rank + offset,
             depth: 0,
@@ -464,22 +475,45 @@ fn climb(tree: &[Node], node: usize, offset: usize) -> usize {
 
 /// Expects the names to be in [1..=alpha].
 fn radix_pass(
+    threads: usize,
     tree: &[Node],
     source_buffer: &[usize],
     target_buffer: &mut [usize],
     offset: usize,
     bucket_buffer: &mut Vec<usize>,
-    alpha: usize
+    alpha: usize,
 ) {
+    fn convert<T, U>(v: &mut Vec<T>) -> &Vec<U> {
+        unsafe { std::mem::transmute(v) }
+    }
+
     bucket_buffer.clear();
     bucket_buffer.reserve(alpha + 1);
     bucket_buffer.extend(std::iter::repeat_n(0, alpha + 1));
 
-    for &node in source_buffer {
-        let offset_node = climb(tree, node, offset);
-        let name = tree[offset_node].name;
-        bucket_buffer[name] += 1;
-    }
+    let count_buffer: &Vec<AtomicUsize> = convert(bucket_buffer);
+
+    rayon::scope(|s| {
+        let threads_total_length = source_buffer.len();
+        let thread_region_length = threads_total_length.div_ceil(threads);
+        for thread_index in 0..threads {
+            s.spawn(move |_| {
+                let start = thread_index * thread_region_length;
+                let end = (start + thread_region_length).min(source_buffer.len());
+                for &node in &source_buffer[start..end] {
+                    let offset_node = climb(tree, node, offset);
+                    let name = tree[offset_node].name;
+                    count_buffer[name].fetch_add(1, Ordering::AcqRel);
+                }
+            });
+        }
+    });
+
+    // for &node in source_buffer {
+    //     let offset_node = climb(tree, node, offset);
+    //     let name = tree[offset_node].name;
+    //     count_buffer[name].fetch_add(1, Ordering::AcqRel);
+    // }
 
     for i in 1..alpha {
         bucket_buffer[i] += bucket_buffer[i - 1]
@@ -499,13 +533,14 @@ const EXTRA_BUFFER_SPACE: usize = 1;
 // alpha - alphabet size
 #[allow(clippy::too_many_arguments)]
 fn sort_tree(
+    threads: usize,
     tree: &mut [Node],
     order: &mut [usize],
     input_names: &mut RMQ,
     bucket_buffer: &mut Vec<usize>,
     alpha: usize,
     rank: usize,
-    k: usize
+    k: usize,
 ) -> RMQ {
     crate::print_memusage(&format!("begin {} < sort_tree", rank));
 
@@ -591,9 +626,9 @@ fn sort_tree(
     assert_eq!(residual_indices.len(), residual_count);
 
     // Step 1: sort the samples.
-    radix_pass(tree, &sample_indices,      &mut sample_suffix_array, 2, bucket_buffer, alpha);
-    radix_pass(tree, &sample_suffix_array, &mut sample_indices,      1, bucket_buffer, alpha);
-    radix_pass(tree, &sample_indices,      &mut sample_suffix_array, 0, bucket_buffer, alpha);
+    radix_pass(threads, tree, &sample_indices,      &mut sample_suffix_array, 2, bucket_buffer, alpha);
+    radix_pass(threads, tree, &sample_suffix_array, &mut sample_indices,      1, bucket_buffer, alpha);
+    radix_pass(threads, tree, &sample_indices,      &mut sample_suffix_array, 0, bucket_buffer, alpha);
 
     let mut sample_lcp        = Vec::<usize>::with_capacity(sample_count);
     let mut sample_name_lengths = Vec::<usize>::with_capacity(sample_count);
@@ -660,12 +695,13 @@ fn sort_tree(
     if name < sample_tree.len() && rank < k {
         let alpha = name;
         sample_names = sort_tree(
+            threads,
             &mut sample_tree,
             &mut sample_indices,
             &mut sample_names,
             bucket_buffer,
             alpha,
-            rank * 3, k
+            rank * 3, k,
         );
         #[allow(clippy::needless_range_loop)]
         for i in 0..sample_count {
@@ -697,7 +733,7 @@ fn sort_tree(
         residual_buckets[parent_name] += 1;
         order[target_index] = residual_index;
     }
-    radix_pass(tree, &order[..residual_count], &mut residual_indices, 0, bucket_buffer, alpha);
+    radix_pass(threads, tree, &order[..residual_count], &mut residual_indices, 0, bucket_buffer, alpha);
 
     // Step 3: merge.
     assert_eq!(residual_count + sample_count, order.len());

@@ -14,7 +14,8 @@ use sbwt::sbwt_index_variant::SbwtIndexVariant;
 //                         points to the root of the subtree
 
 // static mut LAST_TYPE: &str = "";
-// static mut LAST_RESULT: (usize, usize, usize, usize, usize) = (usize::MAX, usize::MAX, usize::MAX, usize::MAX, usize::MAX);
+// static mut LAST_RESULT: (usize, usize, usize, usize, usize)
+//     = (usize::MAX, usize::MAX, usize::MAX, usize::MAX, usize::MAX);
 
 pub struct LongestCommonExtension {
     pub k: usize,
@@ -23,11 +24,21 @@ pub struct LongestCommonExtension {
 }
 
 impl LongestCommonExtension {
-    pub fn new(sbwts: &[&SbwtIndexVariant]) -> LongestCommonExtension
-    {
+    pub fn new_with_pool(threads: usize, sbwts: &[&SbwtIndexVariant]) -> Self {
+        let tp = rayon::ThreadPoolBuilder::new().num_threads(threads).build().unwrap();
+        let mut op: Option<Self> = None;
+        tp.scope(|s| {
+            s.spawn(|_| {
+                op = Some(Self::new(threads, sbwts));
+            });
+        });
+        op.unwrap()
+    }
+
+    pub fn new(threads: usize, sbwts: &[&SbwtIndexVariant]) -> Self {
         crate::print_memusage("before tree decomp");
         log::info!("tree decomposition:");
-        let decomp = dctree::tree_decomposition_rmq(sbwts);
+        let decomp = dctree::TreeDecompositionRMQ::new(threads, sbwts);
         log::info!("level ancestor queries:");
         let laq = LAQ::new(&decomp.tree);
         crate::print_memusage("after level ancestor");
@@ -585,7 +596,7 @@ pub fn test_single_lce(
 
 pub fn test_lce_from_sbwts(sbwts: &[&SbwtIndexVariant]) {
     let k = sbwts[0].k();
-    let lce = LongestCommonExtension::new(sbwts);
+    let lce = LongestCommonExtension::new_with_pool(2, sbwts);
 
     log::info!("testing laq:");
     fn level_ancestor_query(tree: &[Node], mut node: usize, mut climb: usize) -> usize {
