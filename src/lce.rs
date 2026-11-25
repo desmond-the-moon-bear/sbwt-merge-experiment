@@ -25,10 +25,12 @@ pub struct LongestCommonExtension {
 impl LongestCommonExtension {
     pub fn new(sbwts: &[&SbwtIndexVariant]) -> LongestCommonExtension
     {
+        crate::print_memusage("before tree decomp");
         log::info!("tree decomposition:");
         let decomp = dctree::tree_decomposition_rmq(sbwts);
         log::info!("level ancestor queries:");
         let laq = LAQ::new(&decomp.tree);
+        crate::print_memusage("after level ancestor");
 
         LongestCommonExtension {
             k: sbwts[0].k(),

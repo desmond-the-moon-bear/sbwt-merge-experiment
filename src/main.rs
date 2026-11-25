@@ -54,18 +54,37 @@ fn merge_plan_comparison() {
     log::info!("calculated merge:");
     let (lce, calculated_merge) = merge::construct_merge_plan(sbwts);
 
-    let sbwt_1 = match sbwt_1 {
-        SbwtIndexVariant::SubsetMatrix(sbwt_index) => sbwt_index,
-        SbwtIndexVariant::SubsetCorrectionSets(sbwt_index) => unreachable!(),
-    };
-    let sbwt_2 = match sbwt_2 {
-        SbwtIndexVariant::SubsetMatrix(sbwt_index) => sbwt_index,
-        SbwtIndexVariant::SubsetCorrectionSets(sbwt_index) => unreachable!(),
-    };
-    log::info!("canonic merge:");
-    let canonic_merge = sbwt::MergeInterleaving::new(&sbwt_1, &sbwt_2, false, 7);
-    println!("{}", canonic_merge.s1 == calculated_merge.s1);
-    println!("{}", canonic_merge.s2 == calculated_merge.s2);
-    println!("{}", canonic_merge.is_dummy == calculated_merge.is_dummy);
-    println!("{}", canonic_merge.is_leader == calculated_merge.is_leader);
+    print_memusage("after calculated merge");
+
+    // let sbwt_1 = match sbwt_1 {
+    //     SbwtIndexVariant::SubsetMatrix(sbwt_index) => sbwt_index,
+    //     SbwtIndexVariant::SubsetCorrectionSets(sbwt_index) => unreachable!(),
+    // };
+    // let sbwt_2 = match sbwt_2 {
+    //     SbwtIndexVariant::SubsetMatrix(sbwt_index) => sbwt_index,
+    //     SbwtIndexVariant::SubsetCorrectionSets(sbwt_index) => unreachable!(),
+    // };
+    // log::info!("canonic merge:");
+    // let canonic_merge = sbwt::MergeInterleaving::new(&sbwt_1, &sbwt_2, false, 7);
+    // println!("{}", canonic_merge.s1 == calculated_merge.s1);
+    // println!("{}", canonic_merge.s2 == calculated_merge.s2);
+    // println!("{}", canonic_merge.is_dummy == calculated_merge.is_dummy);
+    // println!("{}", canonic_merge.is_leader == calculated_merge.is_leader);
+}
+
+fn print_memusage(prefix: &str) {
+    if let Some(usage) = memory_stats::memory_stats() {
+        // human
+        log::info!(
+            "[{: >30}] physical: {: >15}; virtual: {: >15}",
+            prefix,
+            human_bytes::human_bytes(usage.physical_mem as f64),
+            human_bytes::human_bytes(usage.virtual_mem  as f64),
+        );
+    } else {
+        log::info!(
+            "[{: >30}] physical: {: >15}; virtual: {: >15}",
+            prefix, '?', '?'
+        );
+    }
 }

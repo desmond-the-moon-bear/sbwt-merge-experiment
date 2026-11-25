@@ -120,6 +120,8 @@ pub fn tree_decomposition_rmq(sbwts: &[&SbwtIndexVariant]) -> TreeDecompositionR
         emit_components_from_sbwt(sbwt, index, &mut stack, &mut tree, &mut mapping, &mut mapped, offset);
     }
 
+    crate::print_memusage("after_decomp < td_rmq");
+
     let tree_size = tree.len();
 
     let mut order = vec![0_usize; tree_size];
@@ -134,6 +136,8 @@ pub fn tree_decomposition_rmq(sbwts: &[&SbwtIndexVariant]) -> TreeDecompositionR
     log::info!("sorting the tree:");
     let mut bucket_buffer = vec![];
     let rmq = sort_tree(&mut tree, &mut order, &mut alphabet_rmq, &mut bucket_buffer, 5, 1, k);
+
+    crate::print_memusage("after_sort < td_rmq");
 
     for i in 0..tree_size {
         tree[order[i]].name = i;
@@ -503,6 +507,8 @@ fn sort_tree(
     rank: usize,
     k: usize
 ) -> RMQ {
+    crate::print_memusage(&format!("begin {} < sort_tree", rank));
+
     let n = tree.len();
 
     // The caller should allocate the entire buffer as it probably doesn't know how many names the
@@ -805,6 +811,8 @@ fn sort_tree(
         sample_i += 1;
         write_i += 1;
     }
+
+    crate::print_memusage(&format!("end {} < sort_tree", rank));
 
     RMQ::new(output_name_lengths_buffer, output_lcp_values_buffer)
 }
